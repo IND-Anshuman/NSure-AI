@@ -1,26 +1,42 @@
-# Use a standard Python slim image
+# ---- Stage 1: Build Stage ----
+# Use a full Python image to build dependencies.
+FROM python:3.11-slim as builder
+
+WORKDIR /usr/src/app
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+RUN pip install --upgrade pip
+# Corrected: Removed extra period from requirements.txt
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
+
+
+# ---- Stage 2: Final Stage ----
+# Use a minimal base image for the final container.
 FROM python:3.11-slim
 
 # Set the working directory
 WORKDIR /app
 
-# Set environment variables for Python
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+# Copy the pre-built wheels from the builder stage
+COPY --from=builder /usr/src/app/wheels /wheels
 
-# Copy requirements and install all dependencies
-COPY requirements.txt.
-RUN pip install --no-cache-dir --upgrade pip -r requirements.txt
+# Corrected: Changed "COPY.." to "COPY . ."
+# Copy the application code
+COPY . .
+
+# Install the dependencies from the wheels
+RUN pip install --no-cache /wheels/*
 
 # **THE DEFINITIVE FIX**:
-# Pre-download and save the model to a known, fixed path during the build.
-# This creates the model files directly inside the image.
-RUN python -c "from sentence_transformers import SentenceTransformer; model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); model.save('./embedding_model')"
+# Pre-download the model during the Docker build process.
+# This creates the cache and populates it with the model files.
+# The application will then load the model from this cache at runtime.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder='/app/model_cache')"
 
-# Copy the rest of the application code
-COPY..
-
-# Expose the port Hugging Face Spaces expects
+# Expose the port that Hugging Face Spaces expects
 EXPOSE 7860
 
 # The command to run the application
