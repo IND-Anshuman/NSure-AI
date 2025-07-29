@@ -21,9 +21,12 @@ async def lifespan(app: FastAPI):
     from dotenv import load_dotenv
 
     load_dotenv()
+
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'}
+        model_kwargs={'device': 'cpu'},
+
+        cache_folder="/home/app/model_cache"
     )
     print("   -> Embedding model downloaded and loaded.")
 
