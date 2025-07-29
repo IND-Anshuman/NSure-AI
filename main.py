@@ -6,23 +6,23 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import List, Dict
 
-# Suppress known warnings to keep logs clean
+# Hide annoying warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Set cache directory environment variables
+# Cache settings for HuggingFace models
 os.environ["HF_HOME"] = "/tmp/huggingface_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface_cache/transformers"
 os.environ["HF_HUB_CACHE"] = "/tmp/huggingface_cache/hub"
 os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/huggingface_cache/sentence_transformers"
 
-# --- Global State & Model Cache ---
+# Store models and pipelines in memory
 model_cache = {}
 pipeline_cache: Dict[str, "RAGCore"] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup ---
-    print("--- Application Startup: Downloading and loading models... ---")
+    # Load models when server starts
+    print("--- Loading AI models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_openai import ChatOpenAI
     from dotenv import load_dotenv
@@ -30,101 +30,105 @@ async def lifespan(app: FastAPI):
 
     load_dotenv()
 
-    # Create a temporary directory for model cache
+    # Use temp dir for model storage
     temp_cache_dir = tempfile.mkdtemp(prefix="hf_cache_")
-    print(f"Using temporary cache directory: {temp_cache_dir}")
+    print(f"Using cache: {temp_cache_dir}")
 
     try:
-        # Initialize embedding model with explicit cache directory
+        # Load embedding model
         model_cache["embedding_model"] = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
             model_kwargs={'device': 'cpu'},
             cache_folder=temp_cache_dir
         )
-        print("   -> Embedding model loaded successfully.")
+        print("✅ Embeddings loaded")
 
         model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-        print("   -> LLM loaded.")
-        print("--- Model loading complete. Application is ready. ---")
+        print("✅ LLM loaded")
+        print("🚀 Ready to serve requests!")
     except Exception as e:
-        print(f"Error loading models: {e}")
-        # Try alternative approach without cache_folder
+        print(f"❌ Error loading models: {e}")
+        # Fallback without custom cache
         try:
             model_cache["embedding_model"] = HuggingFaceEmbeddings(
                 model_name="sentence-transformers/all-MiniLM-L6-v2",
                 model_kwargs={'device': 'cpu'}
             )
-            print("   -> Embedding model loaded with default cache.")
+            print("✅ Embeddings loaded (fallback)")
         except Exception as e2:
-            print(f"Failed to load embedding model: {e2}")
+            print(f"❌ Complete failure: {e2}")
             raise e2
 
     yield
 
-    # --- Shutdown ---
-    print("--- Application Shutdown ---")
+    # Cleanup when server shuts down
+    print("🔄 Shutting down...")
     model_cache.clear()
     pipeline_cache.clear()
 
-# --- Application Setup ---
+# Create FastAPI app
 app = FastAPI(
-    title="NSure-AI: Intelligent Query-Retrieval System",
+    title="NSure-AI: Smart Insurance Assistant",
+    description="Upload insurance PDFs and get instant answers to your questions",
+    version="1.0.0",
     lifespan=lifespan
 )
 
-# --- Dynamic Import for RAGCore ---
+# Import our RAG system
 from rag_core import RAGCore
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-# --- Security & Authentication ---
-REQUIRED_BEARER_TOKEN = "ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce"
-bearer_scheme = HTTPBearer()
+# Authentication setup
+API_TOKEN = "ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce"
+bearer_auth = HTTPBearer()
 
-def validate_token(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
-    if credentials.scheme != "Bearer" or credentials.credentials != REQUIRED_BEARER_TOKEN:
+def check_auth(credentials: HTTPAuthorizationCredentials = Security(bearer_auth)):
+    if credentials.scheme != "Bearer" or credentials.credentials != API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing authentication token"
+            detail="Invalid token"
         )
     return credentials.credentials
 
-# --- Pydantic Models ---
+# Request/Response models
 class QueryRequest(BaseModel):
-    documents: str = Field(..., description="A public URL to the PDF document.")
-    questions: List[str] = Field(..., min_length=1, description="List of questions.")
+    documents: str = Field(..., description="URL to PDF document")
+    questions: List[str] = Field(..., min_length=1, description="Questions to answer")
 
 class QueryResponse(BaseModel):
     answers: List[str]
 
-# --- API Endpoints ---
+# API endpoints
 @app.get("/", include_in_schema=False)
-def read_root():
-    return {"status": "NSure-AI API is ready."}
+def home():
+    return {"message": "NSure-AI is running! Check /docs for API info."}
 
-@app.post("/hackrx/run", response_model=QueryResponse, tags=["Core Functionality"])
-async def run_submission(request: QueryRequest, token: str = Depends(validate_token)):
+@app.post("/hackrx/run", response_model=QueryResponse, tags=["Main"])
+async def process_document(request: QueryRequest, token: str = Depends(check_auth)):
     doc_url = request.documents
 
+    # Check if we already processed this document
     if doc_url in pipeline_cache:
-        rag_pipeline = pipeline_cache[doc_url]
-        print(f"Cache HIT: Using existing RAG pipeline for URL: {doc_url}")
+        rag = pipeline_cache[doc_url]
+        print(f"📋 Using cached pipeline for: {doc_url}")
     else:
-        print(f"Cache MISS: Initializing new RAG pipeline for URL: {doc_url}")
+        print(f"🔄 Creating new pipeline for: {doc_url}")
         try:
-            rag_pipeline = RAGCore(
+            rag = RAGCore(
                 document_url=doc_url,
                 embedding_model=model_cache["embedding_model"],
                 llm=model_cache["llm"]
             )
-            pipeline_cache[doc_url] = rag_pipeline
+            pipeline_cache[doc_url] = rag
         except Exception as e:
-            print(f"Error during RAGCore initialization: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
+            print(f"❌ Pipeline creation failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
 
+    # Get answers for all questions
     answers = []
-    for question in request.questions:
-        answer = rag_pipeline.answer_question(question)
+    for q in request.questions:
+        answer = rag.answer_question(q)
         answers.append(answer)
 
     return QueryResponse(answers=answers)

@@ -1,51 +1,47 @@
 # utils.py
 """
-This module contains utility functions for the RAG pipeline, primarily for
-fetching and parsing documents from external sources.
+PDF processing utilities
 """
 import requests
-import fitz  # PyMuPDF library
+import fitz  # PyMuPDF
 
 def get_pdf_text_from_url(url: str) -> str:
-    """
-    Downloads a PDF from a given URL, extracts its text content in memory,
-    and returns it as a single string. This approach is efficient as it
-    avoids writing to disk.
-
-    Args:
-        url (str): The public URL of the PDF document.
-
-    Returns:
-        str: The concatenated text content of all pages in the PDF.
-             Returns an empty string if fetching or parsing fails.
+    """Download PDF from URL and extract all text"""
     
-    Raises:
-        requests.exceptions.RequestException: If the URL is invalid or the
-                                              network request fails.
-        Exception: For errors encountered during PDF parsing.
-    """
-    print(f"Fetching PDF from URL: {url}")
     try:
-        # Use a timeout to prevent hanging on unresponsive servers
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
-
-        # Read PDF content directly from the response bytes
-        pdf_bytes = response.content
+        print(f"📥 Downloading PDF from: {url}")
         
-        text_content = ""
-        # Open the PDF from bytes using fitz
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            print(f"Successfully opened PDF. It has {len(doc)} pages.")
-            # Iterate through each page and extract text
-            for page_num, page in enumerate(doc):
-                text_content += page.get_text()
-            print("Text extraction complete.")
+        # Download the PDF
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
         
-        return text_content
-    except requests.exceptions.RequestException as e:
-        print(f"Error: Failed to fetch PDF from URL. {e}")
-        raise
+        print("📖 Extracting text...")
+        
+        # Open PDF from bytes
+        pdf_doc = fitz.open(stream=response.content, filetype="pdf")
+        
+        # Extract text from all pages
+        full_text = ""
+        for page_num in range(pdf_doc.page_count):
+            page = pdf_doc[page_num]
+            text = page.get_text()
+            full_text += text + "\n"
+        
+        pdf_doc.close()
+        
+        if not full_text.strip():
+            print("⚠️ No text found in PDF")
+            return ""
+        
+        print(f"✅ Extracted {len(full_text)} characters from {pdf_doc.page_count} pages")
+        return full_text
+        
+    except requests.RequestException as e:
+        print(f"❌ Download failed: {e}")
+        return ""
     except Exception as e:
-        print(f"Error: An unexpected error occurred during PDF parsing. {e}")
-        raise
+        print(f"❌ PDF processing failed: {e}")
+        return ""

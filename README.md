@@ -1,133 +1,143 @@
----
-title: NSure-AI
-emoji: 🛡️
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
+# NSure-AI 🛡️
+*Smart Insurance Document Assistant*
 
-# NSure-AI: Intelligent Query-Retrieval System
+A lightning-fast API that reads insurance PDFs and answers questions about them. Built during a weekend hackathon to solve real insurance query problems.
 
-**A high-performance, LLM-powered API to process insurance documents and answer contextual questions. Built for the HackRx hackathon.**
+## What it does
+- Takes any insurance PDF URL
+- Answers specific questions about the policy
+- Remembers documents to avoid reprocessing
+- Works blazingly fast with smart caching
 
----
+## Live Demo
+🚀 **Try it now**: [https://indAlok-nsure-ai.hf.space](https://indAlok-nsure-ai.hf.space)
 
-## Table of Contents
-- [Project Overview](#project-overview)
-- [System Architecture](#system-architecture)
-- [Key Optimizations](#key-optimizations)
-- [Tech Stack](#tech-stack)
-- [API Documentation](#api-documentation)
-- [Setup & Installation](#setup--installation)
-- [How to Run](#how-to-run)
+## Quick Start
 
-## Project Overview
+### Test the API
+```bash
+curl -X POST "https://indAlok-nsure-ai.hf.space/hackrx/run" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce" \
+  -d '{
+    "documents": "https://your-pdf-url.com/policy.pdf",
+    "questions": [
+      "What is the coverage limit?",
+      "Are pre-existing conditions covered?"
+    ]
+  }'
+```
 
-NSure-AI is a robust Retrieval-Augmented Generation (RAG) system designed to meet the hackathon's challenge. It takes a URL to a large document (PDF), processes it, and provides precise, context-aware answers to a list of user questions. The system is built to be fast, accurate, efficient, and highly explainable.
+### Run Locally
+```bash
+git clone https://github.com/IndAlok/NSure-AI.git
+cd NSure-AI
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
 
-## System Architecture
+## How it works
 
-The system uses a production-grade architecture optimized for performance and stability on cloud platforms.
-
-1.  **FastAPI with Lifespan Events:** The API server pre-loads all heavy AI models (`LLM` and `Embedder`) into memory on startup. This "pre-warming" process eliminates cold-start timeouts and ensures the API is instantly ready to handle requests.
-2.  **RAG Core Engine (`rag_core.py`):**
-    * **Document Loader (`utils.py`):** Fetches and parses PDF text efficiently using `PyMuPDF`.
-    * **Local Embedder:** Uses the lightweight and highly-efficient **`sentence-transformers/all-MiniLM-L6-v2`** model, which is bundled with the application to ensure zero runtime downloads and low memory usage.
-    * **Vector Store (FAISS):** Indexes document chunks in an in-memory `FAISS` database for microsecond-level similarity searches.
-    * **Generator (LLM):** Feeds the retrieved context to **`gpt-4o-mini`** to generate precise, factual answers.
-3.  **Caching Layer:** An in-memory cache stores the processed RAG pipeline for each unique document URL, making subsequent queries on the same document instantaneous.
-
-## Key Optimizations
-
-This solution was engineered to excel in all evaluation categories:
-
-* **Latency & Stability:**
-    * **Lifespan Model Pre-loading:** All heavy models are loaded on server startup, not during a request. This completely solves the "cold start" 502 timeout errors common on cloud platforms.
-    * **Hyper-Efficient Local Embeddings:** Switched to the `all-MiniLM-L6-v2` model for its excellent balance of speed, accuracy, and critically, low memory footprint, ensuring stability on free-tier hosting.
-    * **In-Memory FAISS:** Blazing-fast retrieval without network overhead.
-* **Token Efficiency & Cost:**
-    * **Local Embeddings:** Zero API cost for creating text embeddings.
-    * **`gpt-4o-mini`:** Uses one of the most cost-effective and fastest models from OpenAI for final answer generation.
-* **Reusability & Modularity:**
-    * **Production Dockerfile:** A multi-stage `Dockerfile` creates a small, secure, and efficient production image.
-    * **Clean Code Separation:** Logic is cleanly separated into modules (`main.py`, `rag_core.py`, `utils.py`).
+1. **PDF Processing**: Downloads and extracts text from insurance documents
+2. **Smart Chunking**: Breaks documents into meaningful sections
+3. **Vector Search**: Finds relevant parts using AI embeddings
+4. **Answer Generation**: Uses GPT-4o-mini to generate precise answers
+5. **Caching**: Remembers processed documents for instant responses
 
 ## Tech Stack
 
-| Component         | Technology                           | Reason                                                              |
-| ----------------- | ------------------------------------ | ------------------------------------------------------------------- |
-| **Web Framework** | `FastAPI`                            | High performance, modern async features, and lifespan events.       |
-| **LLM** | `OpenAI GPT-4o mini`                 | Superior speed and cost-effectiveness with top-tier intelligence.   |
-| **Vector DB** | `FAISS (in-memory)`                  | Extreme speed for similarity search, no setup needed.               |
-| **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` | Excellent performance with a very low memory footprint for stability. |
-| **PDF Parsing** | `PyMuPDF`                            | Superior speed and accuracy over alternatives.                      |
-| **Deployment** | `Docker` / `HuggingFace`                  | Containerization for consistency and reliable cloud deployment.     |
+- **Backend**: FastAPI + Python
+- **AI Models**: OpenAI GPT-4o-mini + Sentence Transformers
+- **Vector DB**: FAISS (in-memory)
+- **PDF Parser**: PyMuPDF
+- **Deployment**: Docker + HuggingFace Spaces
 
-## API Documentation
+## Project Structure
+```
+NSure-AI/
+├── main.py           # FastAPI server & API endpoints
+├── rag_core.py       # Core RAG logic & document processing
+├── utils.py          # PDF parsing utilities
+├── requirements.txt  # Python dependencies
+├── Dockerfile       # Container setup
+└── README.md        # This file
+```
 
-The API is self-documenting. Once the server is running, visit `http://localhost:8000/docs` for a full, interactive Swagger UI.
+## API Reference
 
-### Endpoint: `POST /hackrx/run`
+### POST /hackrx/run
+Process a document and get answers to questions.
 
-* **Description:** Processes a document and answers questions.
-* **Authentication:** `Authorization: Bearer <your_token>`
-* **Request Body:**
-    ```json
-    {
-    "documents": "https://path/to/your/policy.pdf",
-    "questions": [
-        "What is the grace period for premium payment?",
-        "Does this policy cover maternity expenses?"
-    ]
-    }
-    ```
-* **Success Response (200 OK):**
-    ```json
-    {
-      "answers": [
-        "A grace period of thirty days is provided for premium payment...",
-        "Information not found in the provided policy document."
-      ]
-    }
-    ```
+**Headers:**
+- `Authorization: Bearer ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce`
+- `Content-Type: application/json`
 
-## Setup & Installation
+**Body:**
+```json
+{
+  "documents": "https://example.com/policy.pdf",
+  "questions": ["Your question here"]
+}
+```
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/NSure-AI.git
-    cd NSure-AI
-    ```
+**Response:**
+```json
+{
+  "answers": ["Detailed answer based on the document"]
+}
+```
 
-2.  **Create and activate a virtual environment:**
-    ```bash
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
+## Development
 
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    pip install huggingface-hub # Needed only for the one-time model download
-    ```
+### Environment Setup
+```bash
+# Create virtual environment
+python -m venv env
+source env/bin/activate  # Linux/Mac
+# or
+env\Scripts\activate     # Windows
 
-4.  **Download the Embedding Model:**
-    Run the helper script to download the model files into your project. This ensures instant startup times.
-    ```bash
-    python download_model.py
-    ```
+# Install dependencies
+pip install -r requirements.txt
 
-5.  **Create a `.env` file** in the root directory and add your OpenAI API key:
-    ```
-    OPENAI_API_KEY="sk-..."
-    ```
+# Add your OpenAI key
+echo "OPENAI_API_KEY=your-key-here" > .env
+```
 
-## How to Run
+### Docker Build
+```bash
+docker build -t nsure-ai .
+docker run -p 7860:7860 nsure-ai
+```
 
-1.  Ensure your virtual environment is activated.
-2.  Start the FastAPI server using Uvicorn:
-    ```bash
-    uvicorn main:app --reload
-    ```
-3.  The API will be live at `http://localhost:8000`.
+## Why These Choices?
+
+- **GPT-4o-mini**: Fastest OpenAI model with great accuracy
+- **Local Embeddings**: No API costs for document processing
+- **FAISS**: Fastest vector search without external dependencies
+- **FastAPI**: Modern async framework with auto-documentation
+- **Docker**: Consistent deployment across platforms
+
+## Performance Features
+
+- ⚡ **Pre-loaded Models**: All AI models load on startup, not per request
+- 🧠 **Smart Caching**: Documents processed once, answers served instantly
+- 💰 **Cost Efficient**: Local embeddings + cheapest OpenAI model
+- 🔄 **Auto-retry**: Handles temporary failures gracefully
+- 📊 **Memory Optimized**: Uses lightweight models for stable deployment
+
+## Troubleshooting
+
+**Common Issues:**
+- *401 Unauthorized*: Check your Bearer token
+- *500 Server Error*: Invalid PDF URL or OpenAI key issue
+- *Timeout*: Large documents may take 30-60 seconds on first request
+
+**Need Help?**
+- Check the interactive docs: `/docs` endpoint
+- Verify your PDF is publicly accessible
+- Ensure OpenAI API key has credits
+
+---
+
+*Built for HackRx 2025 | Made with ☕ and determination*

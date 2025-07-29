@@ -1,4 +1,3 @@
-# This is an alternative entry point that some HF Spaces expect
 from main import app
 
 if __name__ == "__main__":
