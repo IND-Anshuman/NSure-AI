@@ -35,6 +35,11 @@ COPY --from=builder /usr/src/app/wheels /wheels
 # from the moment they are created, solving any permission issues.
 COPY --chown=app:app . .
 
+# **THE FINAL FIX**: Pre-create the entire nested directory structure the library needs
+# and recursively set ownership. This guarantees the path is writable by the app user.
+RUN mkdir -p /home/app/model_cache/models--sentence-transformers--all-MiniLM-L6-v2 && \
+    chown -R app:app /home/app/model_cache
+
 # Install the dependencies from the wheels without hitting the network again
 RUN pip install --no-cache /wheels/*
 
