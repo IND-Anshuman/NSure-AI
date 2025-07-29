@@ -30,16 +30,13 @@ WORKDIR /home/app
 # Copy the pre-built wheels from the builder stage
 COPY --from=builder /usr/src/app/wheels /wheels
 
-# Copy the application code
-COPY . .
+# **THE DEFINITIVE FIX**: Use the --chown flag during COPY.
+# This ensures all application files and directories are owned by the 'app' user
+# from the moment they are created, solving any permission issues.
+COPY --chown=app:app . .
 
 # Install the dependencies from the wheels without hitting the network again
 RUN pip install --no-cache /wheels/*
-
-RUN mkdir -p /home/app/model_cache && chown -R app:app /home/app/model_cache
-
-# Change ownership of the entire app directory to the non-root user
-RUN chown -R app:app /home/app
 
 # Switch to the non-root user
 USER app
