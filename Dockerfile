@@ -1,49 +1,36 @@
-# ---- Stage 1: Build Stage ----
-# Use a full Python image to build dependencies.
-FROM python:3.11-slim as builder
-
-WORKDIR /usr/src/app
-
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-RUN pip install --upgrade pip
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
-
-
-# ---- Stage 2: Final Stage ----
-# Use a minimal base image for the final container.
 FROM python:3.11-slim
 
-# Create a non-root user for security best practices.
-RUN addgroup --system app && adduser --system --group app
+# Create app user early
+RUN groupadd --gid 1000 app && useradd --uid 1000 --gid app --shell /bin/bash app
 
-# **THE DEFINITIVE FIX**:
-# 1. Set the official Hugging Face environment variable to point to the writable /data directory.
-#    All Hugging Face libraries will automatically use this path for caching.
-ENV HF_HOME=/data/huggingface_cache
+# Set environment variables for HuggingFace
+ENV HF_HOME=/tmp/huggingface_cache
+ENV TRANSFORMERS_CACHE=/tmp/huggingface_cache/transformers
+ENV HF_HUB_CACHE=/tmp/huggingface_cache/hub
+ENV SENTENCE_TRANSFORMERS_HOME=/tmp/huggingface_cache/sentence_transformers
 
-# 2. Create the cache directory and give our app user ownership of the entire /data volume.
-RUN mkdir -p $HF_HOME && chown -R app:app /data
+# Create cache directories with proper permissions
+RUN mkdir -p /tmp/huggingface_cache/hub \
+    /tmp/huggingface_cache/transformers \
+    /tmp/huggingface_cache/sentence_transformers \
+    && chmod -R 777 /tmp/huggingface_cache
 
-# Set the working directory for the application code.
+# Set working directory
 WORKDIR /home/app
 
-# Copy pre-built wheels from the builder stage.
-COPY --from=builder /usr/src/app/wheels /wheels
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code and set ownership.
+# Copy application code
 COPY --chown=app:app . .
 
-# Install dependencies from local wheels.
-RUN pip install --no-cache /wheels/*
-
-# Switch to the non-root user.
+# Switch to non-root user
 USER app
 
-# Expose the port Hugging Face Spaces expects.
+# Expose port
 EXPOSE 7860
 
-# The command to run the application.
+# Start command
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

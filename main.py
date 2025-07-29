@@ -1,5 +1,6 @@
 # main.py
 import warnings
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -7,6 +8,12 @@ from typing import List, Dict
 
 # Suppress known warnings to keep logs clean
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+# Set cache directory environment variables
+os.environ["HF_HOME"] = "/tmp/huggingface_cache"
+os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface_cache/transformers"
+os.environ["HF_HUB_CACHE"] = "/tmp/huggingface_cache/hub"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/huggingface_cache/sentence_transformers"
 
 # --- Global State & Model Cache ---
 model_cache = {}
@@ -19,22 +26,38 @@ async def lifespan(app: FastAPI):
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_openai import ChatOpenAI
     from dotenv import load_dotenv
+    import tempfile
 
     load_dotenv()
 
-    # **THE DEFINITIVE FIX**:
-    # Remove all 'cache_folder' and local path arguments.
-    # The library will automatically detect the HF_HOME environment variable
-    # set in the Dockerfile and use the correct, writable cache directory.
-    model_cache["embedding_model"] = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'}
-    )
-    print("   -> Embedding model will be downloaded to the correct cache.")
+    # Create a temporary directory for model cache
+    temp_cache_dir = tempfile.mkdtemp(prefix="hf_cache_")
+    print(f"Using temporary cache directory: {temp_cache_dir}")
 
-    model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-    print("   -> LLM loaded.")
-    print("--- Model loading complete. Application is ready. ---")
+    try:
+        # Initialize embedding model with explicit cache directory
+        model_cache["embedding_model"] = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            cache_folder=temp_cache_dir
+        )
+        print("   -> Embedding model loaded successfully.")
+
+        model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+        print("   -> LLM loaded.")
+        print("--- Model loading complete. Application is ready. ---")
+    except Exception as e:
+        print(f"Error loading models: {e}")
+        # Try alternative approach without cache_folder
+        try:
+            model_cache["embedding_model"] = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2",
+                model_kwargs={'device': 'cpu'}
+            )
+            print("   -> Embedding model loaded with default cache.")
+        except Exception as e2:
+            print(f"Failed to load embedding model: {e2}")
+            raise e2
 
     yield
 
