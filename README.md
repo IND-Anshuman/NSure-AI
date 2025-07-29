@@ -1,3 +1,14 @@
+---
+title: NSure-AI
+emoji: 🛡️
+colorFrom: blue
+colorTo: green
+sdk: docker
+sdk_version: "4.36.2"
+app_file: app.py
+pinned: false
+---
+
 # NSure-AI 🛡️
 *Smart Insurance Document Assistant*
 
