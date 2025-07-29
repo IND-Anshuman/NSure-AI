@@ -1,3 +1,12 @@
+---
+title: NSure-AI
+emoji: 🛡️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # NSure-AI: Intelligent Query-Retrieval System
 
 **A high-performance, LLM-powered API to process insurance documents and answer contextual questions. Built for the HackRx hackathon.**
