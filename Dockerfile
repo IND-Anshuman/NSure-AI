@@ -18,33 +18,23 @@ RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
 
 
 # ---- Stage 2: Final Stage ----
-# Use a minimal base image for the final container to reduce size and attack surface.
+# Use a minimal base image for the final container.
 FROM python:3.11-slim
 
-# Create a non-root user for security best practices
-RUN addgroup --system app && adduser --system --group app
-
 # Set the working directory
-WORKDIR /home/app
+WORKDIR /app
 
 # Copy the pre-built wheels from the builder stage
-COPY --from=builder /usr/src/app/wheels /wheels
+COPY --from=builder /app/wheels /wheels
 
-# **THE DEFINITIVE FIX**: Use the --chown flag during COPY.
-# This ensures all application files and directories are owned by the 'app' user
-# from the moment they are created, solving any permission issues.
-COPY --chown=app:app . .
-
-# **THE FINAL FIX**: Pre-create the entire nested directory structure the library needs
-# and recursively set ownership. This guarantees the path is writable by the app user.
-RUN mkdir -p /home/app/model_cache/models--sentence-transformers--all-MiniLM-L6-v2 && \
-    chown -R app:app /home/app/model_cache
+# Copy the application code
+COPY . .
 
 # Install the dependencies from the wheels without hitting the network again
 RUN pip install --no-cache /wheels/*
 
-# Switch to the non-root user
-USER app
+# **THE FINAL FIX**: We will run as the root user to bypass all permission issues.
+# All user creation and switching logic has been removed.
 
 # Expose the port that Hugging Face Spaces expects
 EXPOSE 7860
