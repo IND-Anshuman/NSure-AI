@@ -22,13 +22,13 @@ async def lifespan(app: FastAPI):
 
     load_dotenv()
 
+    # **THE FINAL FIX**: Tell the library to use the guaranteed writable cache directory.
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         model_kwargs={'device': 'cpu'},
-
-        cache_folder="/home/app/model_cache"
+        cache_folder="/data/model_cache"
     )
-    print("   -> Embedding model downloaded and loaded.")
+    print("   -> Embedding model will be cached in /data/model_cache.")
 
     model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     print("   -> LLM loaded.")
