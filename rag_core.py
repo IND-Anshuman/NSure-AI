@@ -7,15 +7,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from utils import get_pdf_text_from_url
 
 def smart_chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
-    """
-    Performs a two-stage intelligent chunking process inspired by the working solution.
-    1. Splits the document into logical sections based on common policy structures.
-    2. Further splits any oversized sections recursively.
-    """
-    # Stage 1: Split by logical sections (clauses, sections, numbered points, paragraphs)
     logical_splits = re.split(r'(?m)(^\s*\d+\.\s|^\s*[a-zA-Z]\.\s|^\s*•\s|^\s*Section\s\w+|^\s*Clause\s\w+|\n\s*\n)', text)
-
-    # Recombine the delimiter (like "Section 1.") with the text that follows it.
+    
     combined_splits = []
     i = 1
     while i < len(logical_splits):
@@ -23,26 +16,23 @@ def smart_chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str
         if combined_text:
             combined_splits.append(combined_text)
         i += 2
-
-    # Add the initial part of the text if it exists before the first split.
+    
     if logical_splits and logical_splits[0].strip():
         combined_splits.insert(0, logical_splits[0].strip())
 
-    # Stage 2: Use RecursiveCharacterTextSplitter only on chunks that are too large.
     final_chunks = []
     recursive_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
-
+    
     for chunk in combined_splits:
         if len(chunk) > chunk_size:
-            # If a logical chunk is too big, split it further.
             sub_chunks = recursive_splitter.split_text(chunk)
             final_chunks.extend(sub_chunks)
         else:
             final_chunks.append(chunk)
-
+    
     print(f"Split into {len(final_chunks)} semantically aware chunks")
     return final_chunks
 
@@ -55,7 +45,6 @@ class RAGCore:
         if not raw_text:
             raise ValueError("Couldn't read PDF - check the URL")
 
-        # Use the new, improved chunking function
         print("📝 Chunking document...")
         chunks = smart_chunk_text(raw_text, chunk_size=1000, chunk_overlap=200)
         documents = [Document(page_content=chunk) for chunk in chunks]
