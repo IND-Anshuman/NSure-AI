@@ -8,7 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 RUN pip install --upgrade pip
-# Corrected: Removed extra period from requirements.txt
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
 
@@ -23,11 +22,10 @@ WORKDIR /app
 # Copy the pre-built wheels from the builder stage
 COPY --from=builder /usr/src/app/wheels /wheels
 
-# Corrected: Changed "COPY.." to "COPY . ."
 # Copy the application code
 COPY . .
 
-# Install the dependencies from the wheels
+# Install the dependencies from the local wheels
 RUN pip install --no-cache /wheels/*
 
 # **THE DEFINITIVE FIX**:

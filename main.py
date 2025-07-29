@@ -22,13 +22,14 @@ async def lifespan(app: FastAPI):
 
     load_dotenv()
 
-    # Load the model from the cache created during the Docker build.
-    # The path must be absolute within the container.
+    # **THE DEFINITIVE FIX**: Load the model from the specific sub-directory
+    # within the cache where it's actually stored.
+    model_path = "/app/model_cache/models--sentence-transformers--all-MiniLM-L6-v2"
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
-        model_name="/app/model_cache",
+        model_name=model_path,
         model_kwargs={'device': 'cpu'}
     )
-    print("   -> Embedding model loaded from local cache.")
+    print(f"   -> Embedding model loaded from local cache: {model_path}")
 
     model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     print("   -> LLM loaded.")
@@ -97,7 +98,6 @@ async def run_submission(request: QueryRequest, token: str = Depends(validate_to
             print(f"Error during RAGCore initialization: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
-    # **THE FIX**: Corrected the "answers =" syntax error.
     answers = []
     for question in request.questions:
         answer = rag_pipeline.answer_question(question)
