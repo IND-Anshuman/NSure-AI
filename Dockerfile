@@ -24,8 +24,9 @@ FROM python:3.11-slim
 # Set the working directory
 WORKDIR /app
 
+# **THE FIX**: Correct the source path from the builder stage.
 # Copy the pre-built wheels from the builder stage
-COPY --from=builder /app/wheels /wheels
+COPY --from=builder /usr/src/app/wheels /wheels
 
 # Copy the application code
 COPY . .
@@ -33,7 +34,7 @@ COPY . .
 # Install the dependencies from the wheels without hitting the network again
 RUN pip install --no-cache /wheels/*
 
-# **THE FINAL FIX**: We will run as the root user to bypass all permission issues.
+# We will run as the root user to bypass all permission issues.
 # All user creation and switching logic has been removed.
 
 # Expose the port that Hugging Face Spaces expects
