@@ -1,17 +1,10 @@
-# utils.py
-"""
-PDF processing utilities
-"""
 import requests
-import fitz  # PyMuPDF
+import fitz
 
 def get_pdf_text_from_url(url: str) -> str:
-    """Download PDF from URL and extract all text"""
-    
     try:
         print(f"📥 Downloading PDF from: {url}")
         
-        # Download the PDF
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -20,10 +13,8 @@ def get_pdf_text_from_url(url: str) -> str:
         
         print("📖 Extracting text...")
         
-        # Open PDF from bytes
         pdf_doc = fitz.open(stream=response.content, filetype="pdf")
         
-        # Extract text from all pages
         full_text = ""
         for page_num in range(pdf_doc.page_count):
             page = pdf_doc[page_num]
