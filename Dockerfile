@@ -21,21 +21,27 @@ RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
 # Use a minimal base image for the final container.
 FROM python:3.11-slim
 
-# Set the working directory
-WORKDIR /app
+# Create a non-root user for security best practices
+RUN addgroup --system app && adduser --system --group app
 
-# **THE FIX**: Correct the source path from the builder stage.
+# **THE FINAL FIX**: Create the cache directory in the guaranteed writable /data volume
+# and give our app user ownership of it.
+RUN mkdir -p /data/model_cache && chown -R app:app /data
+
+# Set the working directory
+WORKDIR /home/app
+
 # Copy the pre-built wheels from the builder stage
 COPY --from=builder /usr/src/app/wheels /wheels
 
-# Copy the application code
-COPY . .
+# Copy the application code and give ownership to the app user
+COPY --chown=app:app . .
 
 # Install the dependencies from the wheels without hitting the network again
 RUN pip install --no-cache /wheels/*
 
-# We will run as the root user to bypass all permission issues.
-# All user creation and switching logic has been removed.
+# Switch to the non-root user
+USER app
 
 # Expose the port that Hugging Face Spaces expects
 EXPOSE 7860
