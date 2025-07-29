@@ -16,26 +16,34 @@ RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
 # Use a minimal base image for the final container.
 FROM python:3.11-slim
 
-# Set the working directory
-WORKDIR /app
+# Create a non-root user for security best practices.
+RUN addgroup --system app && adduser --system --group app
 
-# Copy the pre-built wheels from the builder stage
+# Define the writable cache directory using an environment variable.
+# The sentence-transformers library will automatically use this path.
+ENV HF_HOME=/data/huggingface_cache
+
+# Create the cache directory and give our app user ownership.
+RUN mkdir -p $HF_HOME && chown -R app:app /data
+
+# Set the working directory.
+WORKDIR /home/app
+
+# Copy pre-built wheels from the builder stage.
 COPY --from=builder /usr/src/app/wheels /wheels
 
-# Copy the application code
-COPY..
+# Copy application code and set ownership.
+# **THE FIX**: Corrected "COPY.." to "COPY . ."
+COPY --chown=app:app . .
 
-# Install the dependencies from the wheels
+# Install dependencies from local wheels.
 RUN pip install --no-cache /wheels/*
 
-# **THE DEFINITIVE FIX**:
-# Pre-download the model during the Docker build process.
-# This creates the cache and populates it with the model files.
-# The application will then load the model from this cache at runtime.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder='./model_cache')"
+# Switch to the non-root user.
+USER app
 
-# Expose the port that Hugging Face Spaces expects
+# Expose the port Hugging Face Spaces expects.
 EXPOSE 7860
 
-# The command to run the application
+# The command to run the application.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
