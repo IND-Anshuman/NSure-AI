@@ -12,7 +12,7 @@ pinned: false
 # NSure-AI 🛡️
 *Smart Insurance Document Assistant*
 
-A lightning-fast API that reads insurance PDFs and answers questions about them. Built during a weekend hackathon to solve real insurance query problems.
+A lightning-fast API that reads insurance PDFs and answers questions about them.
 
 ## What it does
 - Takes any insurance PDF URL
