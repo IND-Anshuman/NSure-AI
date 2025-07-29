@@ -16,26 +16,34 @@ RUN pip wheel --no-cache-dir --wheel-dir /usr/src/app/wheels -r requirements.txt
 # Use a minimal base image for the final container.
 FROM python:3.11-slim
 
-# Set the working directory
-WORKDIR /app
-
-# Copy the pre-built wheels from the builder stage
-COPY --from=builder /usr/src/app/wheels /wheels
-
-# Copy the application code
-COPY . .
-
-# Install the dependencies from the local wheels
-RUN pip install --no-cache /wheels/*
+# Create a non-root user for security best practices.
+RUN addgroup --system app && adduser --system --group app
 
 # **THE DEFINITIVE FIX**:
-# Pre-download the model during the Docker build process.
-# This creates the cache and populates it with the model files.
-# The application will then load the model from this cache at runtime.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder='/app/model_cache')"
+# 1. Set the official Hugging Face environment variable to point to the writable /data directory.
+#    All Hugging Face libraries will automatically use this path for caching.
+ENV HF_HOME=/data/huggingface_cache
 
-# Expose the port that Hugging Face Spaces expects
+# 2. Create the cache directory and give our app user ownership of the entire /data volume.
+RUN mkdir -p $HF_HOME && chown -R app:app /data
+
+# Set the working directory for the application code.
+WORKDIR /home/app
+
+# Copy pre-built wheels from the builder stage.
+COPY --from=builder /usr/src/app/wheels /wheels
+
+# Copy application code and set ownership.
+COPY --chown=app:app . .
+
+# Install dependencies from local wheels.
+RUN pip install --no-cache /wheels/*
+
+# Switch to the non-root user.
+USER app
+
+# Expose the port Hugging Face Spaces expects.
 EXPOSE 7860
 
-# The command to run the application
+# The command to run the application.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

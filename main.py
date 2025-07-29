@@ -15,21 +15,22 @@ pipeline_cache: Dict[str, "RAGCore"] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
-    print("--- Application Startup: Loading pre-cached models... ---")
+    print("--- Application Startup: Downloading and loading models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_openai import ChatOpenAI
     from dotenv import load_dotenv
 
     load_dotenv()
 
-    # **THE DEFINITIVE FIX**: Load the model from the specific sub-directory
-    # within the cache where it's actually stored.
-    model_path = "/app/model_cache/models--sentence-transformers--all-MiniLM-L6-v2"
+    # **THE DEFINITIVE FIX**:
+    # Remove all 'cache_folder' and local path arguments.
+    # The library will automatically detect the HF_HOME environment variable
+    # set in the Dockerfile and use the correct, writable cache directory.
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
-        model_name=model_path,
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
         model_kwargs={'device': 'cpu'}
     )
-    print(f"   -> Embedding model loaded from local cache: {model_path}")
+    print("   -> Embedding model will be downloaded to the correct cache.")
 
     model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     print("   -> LLM loaded.")
