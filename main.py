@@ -15,19 +15,17 @@ pipeline_cache: Dict[str, "RAGCore"] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
-    print("--- Application Startup: Loading models... ---")
+    print("--- Application Startup: Downloading and loading models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_openai import ChatOpenAI
     from dotenv import load_dotenv
 
     load_dotenv()
-
-    # Load the NEW, smaller embedding model
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
-        model_name="./models/all-MiniLM-L6-v2", # IMPORTANT: Points to the new model
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
         model_kwargs={'device': 'cpu'}
     )
-    print("   -> Embedding model loaded.")
+    print("   -> Embedding model downloaded and loaded.")
 
     model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     print("   -> LLM loaded.")
@@ -48,7 +46,6 @@ app = FastAPI(
 
 # --- Dynamic Import for RAGCore ---
 from rag_core import RAGCore
-# We need to import these here for the endpoint logic
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
