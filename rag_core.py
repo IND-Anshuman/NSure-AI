@@ -55,16 +55,9 @@ class RAGCore:
         self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
         print("✅ Vector index ready")
 
-        prompt_template = """You're an expert at reading insurance documents. Answer the question based ONLY on the provided context.
+        prompt_template = """Answer based only on the provided context. Give direct, factual answers without quotes or explanations.
 
-Rules:
-- Be specific and accurate
-- Quote exact text when possible
-- If the answer isn't in the context, say "Information not found in the document"
-- Don't make assumptions or add external knowledge
-
-Context from document:
-{context}
+Context: {context}
 
 Question: {input}
 
