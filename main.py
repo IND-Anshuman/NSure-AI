@@ -10,24 +10,26 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --- Global State & Model Cache ---
 model_cache = {}
-pipeline_cache: Dict[str, "RAGCore"] = {}
+pipeline_cache: Dict = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup ---
-    print("--- Application Startup: Loading pre-cached models... ---")
+    print("--- Application Startup: Loading pre-downloaded models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_openai import ChatOpenAI
     from dotenv import load_dotenv
 
     load_dotenv()
 
-    # Load the model from the cache created during the Docker build.
+    # **THE DEFINITIVE FIX**:
+    # Load the embedding model from the exact path where we saved it
+    # during the Docker build process. This requires no write permissions.
     model_cache["embedding_model"] = HuggingFaceEmbeddings(
-        model_name="./model_cache/models--sentence-transformers--all-MiniLM-L6-v2",
+        model_name="./embedding_model",  # This is the crucial change
         model_kwargs={'device': 'cpu'}
     )
-    print("   -> Embedding model loaded from local cache.")
+    print("   -> Embedding model loaded from local path.")
 
     model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     print("   -> LLM loaded.")
@@ -56,7 +58,7 @@ REQUIRED_BEARER_TOKEN = "ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7
 bearer_scheme = HTTPBearer()
 
 def validate_token(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
-    if credentials.scheme != "Bearer" or credentials.credentials != REQUIRED_BEARER_TOKEN:
+    if credentials.scheme!= "Bearer" or credentials.credentials!= REQUIRED_BEARER_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing authentication token"
@@ -96,8 +98,7 @@ async def run_submission(request: QueryRequest, token: str = Depends(validate_to
             print(f"Error during RAGCore initialization: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
-    # **THE FIX**: Corrected the "answers =" syntax error.
-    answers = []
+    answers =
     for question in request.questions:
         answer = rag_pipeline.answer_question(question)
         answers.append(answer)
