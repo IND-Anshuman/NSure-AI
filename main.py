@@ -20,7 +20,7 @@ pipeline_cache = {}
 async def lifespan(app: FastAPI):
     print("--- Loading AI models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
-    from langchain_openai import ChatOpenAI
+    from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
     import tempfile
 
@@ -37,7 +37,11 @@ async def lifespan(app: FastAPI):
         )
         print("✅ Embeddings loaded")
 
-        model_cache["llm"] = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+        model_cache["llm"] = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash-exp", 
+            temperature=0.1,
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
         print("✅ LLM loaded")
         print("🚀 Ready to serve requests!")
     except Exception as e:

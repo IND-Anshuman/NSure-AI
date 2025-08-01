@@ -21,7 +21,7 @@ A lightning-fast API that reads insurance PDFs and answers questions about them.
 - Works blazingly fast with smart caching
 
 ## Live Demo
-🚀 **Try it now**: [https://indalok-nsure-ai.hf.space](https://indAlok-nsure-ai.hf.space)
+🚀 **Try it now**: [https://indalok-nsure-ai.hf.space](https://indalok-nsure-ai.hf.space)
 
 ## Quick Start
 
@@ -52,13 +52,13 @@ uvicorn main:app --reload
 1. **PDF Processing**: Downloads and extracts text from insurance documents
 2. **Smart Chunking**: Breaks documents into meaningful sections
 3. **Vector Search**: Finds relevant parts using AI embeddings
-4. **Answer Generation**: Uses GPT-4o-mini to generate precise answers
+4. **Answer Generation**: Uses Google Gemini 2.5 Flash to generate precise answers
 5. **Caching**: Remembers processed documents for instant responses
 
 ## Tech Stack
 
 - **Backend**: FastAPI + Python
-- **AI Models**: OpenAI GPT-4o-mini + Sentence Transformers
+- **AI Models**: Google Gemini 2.5 Flash + Sentence Transformers
 - **Vector DB**: FAISS (in-memory)
 - **PDF Parser**: PyMuPDF
 - **Deployment**: Docker + HuggingFace Spaces
@@ -111,8 +111,8 @@ env\Scripts\activate     # Windows
 # Install dependencies
 pip install -r requirements.txt
 
-# Add your OpenAI key
-echo "OPENAI_API_KEY=your-key-here" > .env
+# Add your Google API key
+echo "GOOGLE_API_KEY=your-key-here" > .env
 ```
 
 ### Docker Build
@@ -123,7 +123,7 @@ docker run -p 7860:7860 nsure-ai
 
 ## Why These Choices?
 
-- **GPT-4o-mini**: Fastest OpenAI model with great accuracy
+- **Gemini 2.5 Flash**: Google's fastest and most capable model with excellent accuracy
 - **Local Embeddings**: No API costs for document processing
 - **FAISS**: Fastest vector search without external dependencies
 - **FastAPI**: Modern async framework with auto-documentation
@@ -133,7 +133,7 @@ docker run -p 7860:7860 nsure-ai
 
 - ⚡ **Pre-loaded Models**: All AI models load on startup, not per request
 - 🧠 **Smart Caching**: Documents processed once, answers served instantly
-- 💰 **Cost Efficient**: Local embeddings + cheapest OpenAI model
+- 💰 **Cost Efficient**: Local embeddings + efficient Gemini model
 - 🔄 **Auto-retry**: Handles temporary failures gracefully
 - 📊 **Memory Optimized**: Uses lightweight models for stable deployment
 
@@ -141,13 +141,13 @@ docker run -p 7860:7860 nsure-ai
 
 **Common Issues:**
 - *401 Unauthorized*: Check your Bearer token
-- *500 Server Error*: Invalid PDF URL or OpenAI key issue
+- *500 Server Error*: Invalid PDF URL or Google API key issue
 - *Timeout*: Large documents may take 30-60 seconds on first request
 
 **Need Help?**
 - Check the interactive docs: `/docs` endpoint
 - Verify your PDF is publicly accessible
-- Ensure OpenAI API key has credits
+- Ensure Google API key has credits and Gemini API access enabled
 
 ---
 
