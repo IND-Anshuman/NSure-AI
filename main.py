@@ -20,7 +20,7 @@ pipeline_cache = {}
 async def lifespan(app: FastAPI):
     print("--- Loading AI models... ---")
     from langchain_huggingface import HuggingFaceEmbeddings
-    from langchain_mistralai import ChatMistralAI
+    from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
     import tempfile
 
@@ -37,12 +37,12 @@ async def lifespan(app: FastAPI):
         )
         print("✅ Embeddings loaded")
 
-        model_cache["llm"] = ChatMistralAI(
-            model="mistral-large-latest",
+        model_cache["llm"] = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash-exp", 
             temperature=0.1,
-            api_key=os.getenv("MISTRAL_API_KEY")
+            google_api_key=os.getenv("GOOGLE_API_KEY")
         )
-        print("✅ Mistral LLM loaded")
+        print("✅ LLM loaded")
         print("🚀 Ready to serve requests!")
     except Exception as e:
         print(f"❌ Error loading models: {e}")
@@ -63,8 +63,8 @@ async def lifespan(app: FastAPI):
     pipeline_cache.clear()
 
 app = FastAPI(
-    title="NSure-AI: Smart Insurance Assistant (Powered by Mistral)",
-    description="Upload insurance PDFs and get instant answers to your questions using Mistral AI",
+    title="NSure-AI: Smart Insurance Assistant",
+    description="Upload insurance PDFs and get instant answers to your questions",
     version="1.0.0",
     lifespan=lifespan
 )
