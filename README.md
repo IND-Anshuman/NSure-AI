@@ -6,7 +6,7 @@ colorTo: green
 sdk: docker
 sdk_version: "4.36.2"
 app_file: app.py
-pinned: false
+pinned: true
 ---
 
 # NSure-AI 🛡️
@@ -21,13 +21,13 @@ A lightning-fast API that reads insurance PDFs and answers questions about them.
 - Works blazingly fast with smart caching
 
 ## Live Demo
-🚀 **Try it now**: [https://indAlok-nsure-ai.hf.space](https://indAlok-nsure-ai.hf.space)
+🚀 **Try it now**: [https://indalok-nsure-ai.hf.space](https://indAlok-nsure-ai.hf.space)
 
 ## Quick Start
 
 ### Test the API
 ```bash
-curl -X POST "https://indAlok-nsure-ai.hf.space/hackrx/run" \
+curl -X POST "https://indalok-nsure-ai.hf.space/hackrx/run" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce" \
   -d '{
