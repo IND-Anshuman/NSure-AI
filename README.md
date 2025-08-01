@@ -12,11 +12,11 @@ pinned: true
 # NSure-AI 🛡️
 *Smart Insurance Document Assistant*
 
-A lightning-fast API that reads insurance PDFs and answers questions about them.
+A lightning-fast API that reads insurance PDFs and answers questions precisely.
 
 ## What it does
 - Takes any insurance PDF URL
-- Answers specific questions about the policy
+- Answers specific questions about the policy using Mistral AI
 - Remembers documents to avoid reprocessing
 - Works blazingly fast with smart caching
 
@@ -44,6 +44,8 @@ curl -X POST "https://indalok-nsure-ai.hf.space/hackrx/run" \
 git clone https://github.com/IndAlok/NSure-AI.git
 cd NSure-AI
 pip install -r requirements.txt
+# Add your Mistral API key to .env
+echo "MISTRAL_API_KEY=your-mistral-key-here" > .env
 uvicorn main:app --reload
 ```
 
@@ -52,13 +54,13 @@ uvicorn main:app --reload
 1. **PDF Processing**: Downloads and extracts text from insurance documents
 2. **Smart Chunking**: Breaks documents into meaningful sections
 3. **Vector Search**: Finds relevant parts using AI embeddings
-4. **Answer Generation**: Uses Google Gemini 2.5 Flash to generate precise answers
+4. **Answer Generation**: Uses Mistral AI to generate precise answers
 5. **Caching**: Remembers processed documents for instant responses
 
 ## Tech Stack
 
 - **Backend**: FastAPI + Python
-- **AI Models**: Google Gemini 2.5 Flash + Sentence Transformers
+- **AI Models**: Mistral AI (mistral-large-latest) + Sentence Transformers
 - **Vector DB**: FAISS (in-memory)
 - **PDF Parser**: PyMuPDF
 - **Deployment**: Docker + HuggingFace Spaces
@@ -111,8 +113,8 @@ env\Scripts\activate     # Windows
 # Install dependencies
 pip install -r requirements.txt
 
-# Add your Google API key
-echo "GOOGLE_API_KEY=your-key-here" > .env
+# Add your Mistral API key
+echo "MISTRAL_API_KEY=your-key-here" > .env
 ```
 
 ### Docker Build
@@ -123,7 +125,7 @@ docker run -p 7860:7860 nsure-ai
 
 ## Why These Choices?
 
-- **Gemini 2.5 Flash**: Google's fastest and most capable model with excellent accuracy
+- **Mistral AI**: Latest free model with excellent performance and reasoning
 - **Local Embeddings**: No API costs for document processing
 - **FAISS**: Fastest vector search without external dependencies
 - **FastAPI**: Modern async framework with auto-documentation
@@ -133,7 +135,7 @@ docker run -p 7860:7860 nsure-ai
 
 - ⚡ **Pre-loaded Models**: All AI models load on startup, not per request
 - 🧠 **Smart Caching**: Documents processed once, answers served instantly
-- 💰 **Cost Efficient**: Local embeddings + efficient Gemini model
+- 💰 **Cost Efficient**: Free Mistral model + local embeddings
 - 🔄 **Auto-retry**: Handles temporary failures gracefully
 - 📊 **Memory Optimized**: Uses lightweight models for stable deployment
 
@@ -141,14 +143,21 @@ docker run -p 7860:7860 nsure-ai
 
 **Common Issues:**
 - *401 Unauthorized*: Check your Bearer token
-- *500 Server Error*: Invalid PDF URL or Google API key issue
+- *500 Server Error*: Invalid PDF URL or Mistral API key issue
 - *Timeout*: Large documents may take 30-60 seconds on first request
 
 **Need Help?**
 - Check the interactive docs: `/docs` endpoint
 - Verify your PDF is publicly accessible
-- Ensure Google API key has credits and Gemini API access enabled
+- Ensure Mistral API key is valid
+
+## Getting Mistral API Key
+
+1. Visit [Mistral AI Console](https://console.mistral.ai/)
+2. Sign up for a free account
+3. Generate an API key
+4. Add it to your `.env` file
 
 ---
 
-*Built for HackRx 2025 | Made with ☕ and determination*
+*Built for HackRx 2025| Made with ☕ and determination*
