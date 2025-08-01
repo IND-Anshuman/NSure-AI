@@ -20,6 +20,9 @@ A lightning-fast API that reads insurance PDFs and answers questions about them.
 - Remembers documents to avoid reprocessing
 - Works blazingly fast with smart caching
 
+## Live Demo
+🚀 **Try it now**: [https://indAlok-nsure-ai.hf.space](https://indAlok-nsure-ai.hf.space)
+
 ## Quick Start
 
 ### Test the API
@@ -110,9 +113,13 @@ pip install -r requirements.txt
 
 # Add your OpenAI key
 echo "OPENAI_API_KEY=your-key-here" > .env
+```
 
-## RUN COMMAND
-uvicorn main:app --host localhost --port 8000
+### Docker Build
+```bash
+docker build -t nsure-ai .
+docker run -p 7860:7860 nsure-ai
+```
 
 ## Why These Choices?
 
