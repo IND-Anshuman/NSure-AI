@@ -172,8 +172,9 @@ class OptimizedRAGCore:
     2. Look for synonyms, medical terms, indirect references, and related concepts
     3. If the exact term isn't found, search for related medical/insurance terminology
     4. Provide specific details including coverage amounts, conditions, exclusions, and procedures
-    5. If information is partial, state what IS covered and note any limitations
+    5. If information is partial, state what is covered and note any limitations
     6. Never say "information not found" if related concepts exist in the document
+    7. Always give a one-line response (Avoid unnecessary connecting text like "Based on provided context"), which should be direct, factual and precise.
 
     CONTEXT ANALYSIS:
     {context}
