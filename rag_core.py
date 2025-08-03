@@ -158,7 +158,7 @@ Answer (one clear sentence with specific details):""")
             
             answers = []
             for question in questions:
-                relevant_docs = retriever.retrieve(question, k=6)
+                relevant_docs = retriever.retrieve(question, k=8)
                 context = "\n\n".join([doc.page_content for doc in relevant_docs])
                 
                 response = await asyncio.get_event_loop().run_in_executor(
