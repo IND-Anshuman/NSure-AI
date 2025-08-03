@@ -12,7 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from utils import get_pdf_text_from_url
 from rank_bm25 import BM25Okapi
 
-def context_aware_chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 150) -> List[str]:
+def context_aware_chunk_text(text: str, chunk_size: int = 1200, chunk_overlap: int = 200) -> List[str]:
     section_patterns = [
         r'(?i)(coverage|benefit|exclusion|limitation|condition|procedure|treatment)',
         r'(?i)(section|clause|article|paragraph)\s+\d+',
@@ -74,7 +74,7 @@ class HybridRetriever:
         faiss.normalize_L2(embeddings)
         self.index.add(embeddings.astype('float32'))
         
-    def retrieve(self, query: str, k: int = 4):
+    def retrieve(self, query: str, k: int = 5):
         query_lower = query.lower()
         tokenized_query = query_lower.split()
         
@@ -107,23 +107,20 @@ class OptimizedRAGCore:
         self.embedding_model = embedding_model
         self.llm = llm
         
-        # Optimized prompt for exact format
         self.prompt_template = ChatPromptTemplate.from_template("""
-You are an insurance policy expert. Answer questions using ONLY the provided context.
+Answer the question with complete information from the policy document. Provide comprehensive details including all conditions, timeframes, amounts, and requirements mentioned.
 
-CRITICAL INSTRUCTIONS:
-- Provide direct, complete answers exactly as written in the policy
-- Start answers with specific details (grace period of X days, waiting period of X months, etc.)
-- Use the EXACT wording from the policy document
-- Include all relevant conditions and limits mentioned
-- Do NOT summarize or paraphrase - copy the exact language
-- Do NOT add explanations or context beyond what's asked
+Examples of good answers:
+- "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits."
+- "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered."
+
+Write complete sentences with full details. Include specific numbers, timeframes, conditions, and amounts.
 
 Context: {context}
 
 Question: {question}
 
-Answer (use exact policy language):""")
+Complete Answer:""")
 
     async def process_queries(self, pdf_url: str, questions: List[str]) -> List[str]:
         try:
@@ -138,7 +135,7 @@ Answer (use exact policy language):""")
             
             answers = []
             for question in questions:
-                relevant_docs = retriever.retrieve(question, k=3)
+                relevant_docs = retriever.retrieve(question, k=5)
                 context = "\n\n".join([doc.page_content for doc in relevant_docs])
                 
                 response = await asyncio.get_event_loop().run_in_executor(
@@ -148,8 +145,7 @@ Answer (use exact policy language):""")
                     question
                 )
                 
-                # Clean and format response
-                clean_answer = self._format_answer(response)
+                clean_answer = self._format_answer(response, question)
                 answers.append(clean_answer)
             
             return answers
@@ -166,8 +162,9 @@ Answer (use exact policy language):""")
         response = self.llm.invoke(messages)
         return response.content.strip()
     
-    def _format_answer(self, raw_answer: str) -> str:
-        # Remove common LLM prefixes and suffixes
+    def _format_answer(self, raw_answer: str, question: str) -> str:
+        answer = raw_answer.strip()
+        
         prefixes_to_remove = [
             "According to the policy,",
             "The policy states that",
@@ -175,19 +172,33 @@ Answer (use exact policy language):""")
             "The document mentions that",
             "Answer:",
             "Response:",
+            "Complete Answer:",
         ]
-        
-        answer = raw_answer.strip()
         
         for prefix in prefixes_to_remove:
             if answer.lower().startswith(prefix.lower()):
                 answer = answer[len(prefix):].strip()
         
-        # Ensure proper capitalization and punctuation
+        if not answer:
+            return f"Information not found in the policy document for: {question}"
+        
+        if answer.startswith('[') and 'cut off' in answer.lower():
+            return f"Information not available in the provided policy text."
+        
+        if answer.lower().startswith('this question cannot be answered'):
+            return f"Information not available in the provided policy text."
+        
+        if 'provided text does not' in answer.lower():
+            return f"Information not available in the provided policy text."
+        
         if answer and not answer[0].isupper():
             answer = answer[0].upper() + answer[1:]
         
         if answer and not answer.endswith('.'):
             answer += '.'
+        
+        answer = re.sub(r'\s+', ' ', answer)
+        answer = answer.replace('â', '-')
+        answer = answer.replace('*', '')
         
         return answer
