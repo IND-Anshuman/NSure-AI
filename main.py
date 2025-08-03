@@ -1,20 +1,62 @@
 import warnings
 import os
+import asyncio
+import uvloop
+import redis
+import pickle
+import hashlib
+import time
+import functools
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import List, Dict
 
-warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore")
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-os.environ["HF_HOME"] = "/tmp/huggingface_cache"
-os.environ["TRANSFORMERS_CACHE"] = "/tmp/huggingface_cache/transformers"
-os.environ["HF_HUB_CACHE"] = "/tmp/huggingface_cache/hub"
-os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/huggingface_cache/sentence_transformers"
+os.environ["HF_HOME"] = "/tmp/hf_cache"
+os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache/transformers"
+os.environ["HF_HUB_CACHE"] = "/tmp/hf_cache/hub"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/hf_cache/sentence_transformers"
 
 model_cache = {}
 pipeline_cache = {}
+executor = ThreadPoolExecutor(max_workers=8)
+
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+    redis_client.ping()
+except:
+    redis_client = None
+
+def timed_cache(maxsize=64, ttl=1800):
+    def decorator(func):
+        cache = {}
+        cache_times = {}
+        
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = str(args) + str(sorted(kwargs.items()))
+            current_time = time.time()
+            
+            if key in cache and current_time - cache_times[key] < ttl:
+                return cache[key]
+            
+            result = func(*args, **kwargs)
+            cache[key] = result
+            cache_times[key] = current_time
+            
+            if len(cache) > maxsize:
+                oldest_key = min(cache_times.keys(), key=lambda k: cache_times[k])
+                del cache[oldest_key]
+                del cache_times[oldest_key]
+            
+            return result
+        return wrapper
+    return decorator
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,54 +64,49 @@ async def lifespan(app: FastAPI):
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
-    import tempfile
-
+    
     load_dotenv()
-
-    temp_cache_dir = tempfile.mkdtemp(prefix="hf_cache_")
-    print(f"Using cache: {temp_cache_dir}")
-
+    
     try:
         model_cache["embedding_model"] = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'},
-            cache_folder=temp_cache_dir
+            model_kwargs={'device': 'cpu', 'trust_remote_code': True},
+            encode_kwargs={'batch_size': 64, 'show_progress_bar': False, 'normalize_embeddings': True}
         )
         print("✅ Embeddings loaded")
 
         model_cache["llm"] = ChatGoogleGenerativeAI(
-            model="gemini-embedding-001", 
-            temperature=0.1,
+            model="gemini-2.0-flash-exp", 
+            temperature=0.05,
+            max_tokens=400,
+            timeout=12,
+            max_retries=2,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         print("✅ LLM loaded")
         print("🚀 Ready to serve requests!")
     except Exception as e:
         print(f"❌ Error loading models: {e}")
-        try:
-            model_cache["embedding_model"] = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2",
-                model_kwargs={'device': 'cpu'}
-            )
-            print("✅ Embeddings loaded (fallback)")
-        except Exception as e2:
-            print(f"❌ Complete failure: {e2}")
-            raise e2
+        model_cache["embedding_model"] = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'}
+        )
+        print("✅ Embeddings loaded (fallback)")
 
     yield
 
-    print("🔄 Shutting down...")
+    executor.shutdown(wait=True)
     model_cache.clear()
     pipeline_cache.clear()
 
 app = FastAPI(
     title="NSure-AI: Smart Insurance Assistant",
-    description="Upload insurance PDFs and get instant answers to your questions",
-    version="1.0.0",
+    description="Upload insurance PDFs and get instant answers",
+    version="2.0.0",
     lifespan=lifespan
 )
 
-from rag_core import RAGCore
+from rag_core import OptimizedRAGCore
 
 API_TOKEN = "ee3aca9314e8c88b242c5f86bdb52d0bbb80293d95ced9beb6553a7fbb8cd1ce"
 bearer_auth = HTTPBearer()
@@ -93,29 +130,53 @@ class QueryResponse(BaseModel):
 def home():
     return {"message": "NSure-AI is running! Check /docs for API info."}
 
+def get_cache_key(doc_url: str) -> str:
+    return hashlib.md5(doc_url.encode()).hexdigest()
+
+@timed_cache(maxsize=32, ttl=3600)
+def get_or_create_rag(doc_url: str):
+    cache_key = get_cache_key(doc_url)
+    
+    if redis_client:
+        try:
+            cached_rag = redis_client.get(cache_key)
+            if cached_rag:
+                return pickle.loads(cached_rag)
+        except:
+            pass
+    
+    if cache_key in pipeline_cache:
+        return pipeline_cache[cache_key]
+    
+    rag = OptimizedRAGCore(
+        document_url=doc_url,
+        embedding_model=model_cache["embedding_model"],
+        llm=model_cache["llm"]
+    )
+    
+    pipeline_cache[cache_key] = rag
+    
+    if redis_client:
+        try:
+            redis_client.setex(cache_key, 3600, pickle.dumps(rag))
+        except:
+            pass
+    
+    return rag
+
 @app.post("/hackrx/run", response_model=QueryResponse, tags=["Main"])
 async def process_document(request: QueryRequest, token: str = Depends(check_auth)):
     doc_url = request.documents
-
-    if doc_url in pipeline_cache:
-        rag = pipeline_cache[doc_url]
-        print(f"📋 Using cached pipeline for: {doc_url}")
+    questions = request.questions
+    
+    loop = asyncio.get_event_loop()
+    rag = await loop.run_in_executor(executor, get_or_create_rag, doc_url)
+    
+    if len(questions) == 1:
+        answer = await loop.run_in_executor(executor, rag.answer_question, questions[0])
+        answers = [answer]
     else:
-        print(f"🔄 Creating new pipeline for: {doc_url}")
-        try:
-            rag = RAGCore(
-                document_url=doc_url,
-                embedding_model=model_cache["embedding_model"],
-                llm=model_cache["llm"]
-            )
-            pipeline_cache[doc_url] = rag
-        except Exception as e:
-            print(f"❌ Pipeline creation failed: {e}")
-            raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
-
-    answers = []
-    for q in request.questions:
-        answer = rag.answer_question(q)
-        answers.append(answer)
-
+        tasks = [loop.run_in_executor(executor, rag.answer_question, q) for q in questions]
+        answers = await asyncio.gather(*tasks)
+    
     return QueryResponse(answers=answers)
