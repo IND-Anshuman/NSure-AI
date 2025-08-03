@@ -1,9 +1,6 @@
 import warnings
 import os
 import asyncio
-import uvloop
-import redis
-import pickle
 import hashlib
 import time
 import functools
@@ -15,24 +12,15 @@ from pydantic import BaseModel, Field
 from typing import List, Dict
 
 warnings.filterwarnings("ignore")
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 os.environ["HF_HOME"] = "/tmp/hf_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache/transformers"
-os.environ["HF_HUB_CACHE"] = "/tmp/hf_cache/hub"
-os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/hf_cache/sentence_transformers"
 
 model_cache = {}
 pipeline_cache = {}
-executor = ThreadPoolExecutor(max_workers=8)
+executor = ThreadPoolExecutor(max_workers=4)
 
-try:
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-    redis_client.ping()
-except:
-    redis_client = None
-
-def timed_cache(maxsize=64, ttl=1800):
+def timed_cache(maxsize=32, ttl=1800):
     def decorator(func):
         cache = {}
         cache_times = {}
@@ -60,19 +48,15 @@ def timed_cache(maxsize=64, ttl=1800):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("--- Loading AI models... ---")
-    from langchain_huggingface import HuggingFaceEmbeddings
+    print("--- Loading models ---")
+    from sentence_transformers import SentenceTransformer
     from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
     
     load_dotenv()
     
     try:
-        model_cache["embedding_model"] = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu', 'trust_remote_code': True},
-            encode_kwargs={'batch_size': 64, 'show_progress_bar': False, 'normalize_embeddings': True}
-        )
+        model_cache["embedding_model"] = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         print("✅ Embeddings loaded")
 
         model_cache["llm"] = ChatGoogleGenerativeAI(
@@ -84,17 +68,12 @@ async def lifespan(app: FastAPI):
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         print("✅ LLM loaded")
-        print("🚀 Ready to serve requests!")
     except Exception as e:
-        print(f"❌ Error loading models: {e}")
-        model_cache["embedding_model"] = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'}
-        )
-        print("✅ Embeddings loaded (fallback)")
+        print(f"❌ Error: {e}")
+        raise e
 
     yield
-
+    
     executor.shutdown(wait=True)
     model_cache.clear()
     pipeline_cache.clear()
@@ -128,22 +107,11 @@ class QueryResponse(BaseModel):
 
 @app.get("/", include_in_schema=False)
 def home():
-    return {"message": "NSure-AI is running! Check /docs for API info."}
+    return {"message": "NSure-AI v2.0 is running! Check /docs for API info."}
 
-def get_cache_key(doc_url: str) -> str:
-    return hashlib.md5(doc_url.encode()).hexdigest()
-
-@timed_cache(maxsize=32, ttl=3600)
+@timed_cache(maxsize=16, ttl=3600)
 def get_or_create_rag(doc_url: str):
-    cache_key = get_cache_key(doc_url)
-    
-    if redis_client:
-        try:
-            cached_rag = redis_client.get(cache_key)
-            if cached_rag:
-                return pickle.loads(cached_rag)
-        except:
-            pass
+    cache_key = hashlib.md5(doc_url.encode()).hexdigest()
     
     if cache_key in pipeline_cache:
         return pipeline_cache[cache_key]
@@ -155,13 +123,6 @@ def get_or_create_rag(doc_url: str):
     )
     
     pipeline_cache[cache_key] = rag
-    
-    if redis_client:
-        try:
-            redis_client.setex(cache_key, 3600, pickle.dumps(rag))
-        except:
-            pass
-    
     return rag
 
 @app.post("/hackrx/run", response_model=QueryResponse, tags=["Main"])
