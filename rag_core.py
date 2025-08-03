@@ -139,52 +139,52 @@ def smart_chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 80) 
 
 class OptimizedRAGCore:
     def __init__(self, document_url: str, embedding_model, llm):
-    print(f"🔄 Setting up context-aware RAG for: {document_url}")
-    self.llm = llm
+        print(f"🔄 Setting up context-aware RAG for: {document_url}")
+        self.llm = llm
 
-    try:
-        raw_text = get_pdf_text_from_url(document_url)
-        if not raw_text:
-            raise ValueError("PDF read failed")
-    except Exception as e:
-        raise ValueError(f"Document processing failed: {str(e)}")
+        try:
+            raw_text = get_pdf_text_from_url(document_url)
+            if not raw_text:
+                raise ValueError("PDF read failed")
+        except Exception as e:
+            raise ValueError(f"Document processing failed: {str(e)}")
 
-    try:
-        print("📝 Context-aware chunking...")
-        chunks = context_aware_chunk_text(raw_text, chunk_size=1000, chunk_overlap=150)
-        documents = [Document(page_content=chunk) for chunk in chunks]
-        print(f"✅ Created {len(documents)} context-aware chunks")
-    except Exception as e:
-        documents = [Document(page_content=raw_text[:1000])]
+        try:
+            print("📝 Context-aware chunking...")
+            chunks = context_aware_chunk_text(raw_text, chunk_size=1000, chunk_overlap=150)
+            documents = [Document(page_content=chunk) for chunk in chunks]
+            print(f"✅ Created {len(documents)} context-aware chunks")
+        except Exception as e:
+            documents = [Document(page_content=raw_text[:1000])]
 
-    try:
-        print("🧠 Building enhanced hybrid index...")
-        self.retriever = EnhancedHybridRetriever(documents, embedding_model, alpha=0.6)
-        print("✅ Enhanced retriever ready")
-    except Exception as e:
-        print(f"Enhanced retriever failed, using fallback: {e}")
-        self.retriever = HybridRetriever(documents, embedding_model, alpha=0.6)
+        try:
+            print("🧠 Building enhanced hybrid index...")
+            self.retriever = EnhancedHybridRetriever(documents, embedding_model, alpha=0.6)
+            print("✅ Enhanced retriever ready")
+        except Exception as e:
+            print(f"Enhanced retriever failed, using fallback: {e}")
+            self.retriever = HybridRetriever(documents, embedding_model, alpha=0.6)
 
-    prompt_template = """You are an expert insurance policy analyst. Analyze the provided context carefully and answer the question with high precision.
+        prompt_template = """You are an expert insurance policy analyst. Analyze the provided context carefully and answer the question with high precision.
 
-INSTRUCTIONS:
-1. Extract ALL relevant information from the context, even if terminology differs from the question
-2. Look for synonyms, medical terms, indirect references, and related concepts
-3. If the exact term isn't found, search for related medical/insurance terminology
-4. Provide specific details including coverage amounts, conditions, exclusions, and procedures
-5. If information is partial, state what IS covered and note any limitations
-6. Never say "information not found" if related concepts exist in the document
+    INSTRUCTIONS:
+    1. Extract ALL relevant information from the context, even if terminology differs from the question
+    2. Look for synonyms, medical terms, indirect references, and related concepts
+    3. If the exact term isn't found, search for related medical/insurance terminology
+    4. Provide specific details including coverage amounts, conditions, exclusions, and procedures
+    5. If information is partial, state what IS covered and note any limitations
+    6. Never say "information not found" if related concepts exist in the document
 
-CONTEXT ANALYSIS:
-{context}
+    CONTEXT ANALYSIS:
+    {context}
 
-QUESTION: {input}
+    QUESTION: {input}
 
-ANSWER (be specific and factual):"""
+    ANSWER (be specific and factual):"""
 
-    prompt = ChatPromptTemplate.from_template(prompt_template)
-    self.qa_chain = create_stuff_documents_chain(self.llm, prompt)
-    print("✅ Context-aware QA ready")
+        prompt = ChatPromptTemplate.from_template(prompt_template)
+        self.qa_chain = create_stuff_documents_chain(self.llm, prompt)
+        print("✅ Context-aware QA ready")
 
     def _safe_retrieve(self, question: str):
         try:
