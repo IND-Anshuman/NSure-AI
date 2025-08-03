@@ -7,12 +7,11 @@ from functools import lru_cache
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from utils import get_pdf_text_from_url
 from rank_bm25 import BM25Okapi
 
-def context_aware_chunk_text(text: str, chunk_size: int = 1200, chunk_overlap: int = 200) -> List[str]:
+def context_aware_chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 100) -> List[str]:
     section_patterns = [
         r'(?i)(coverage|benefit|exclusion|limitation|condition|procedure|treatment)',
         r'(?i)(section|clause|article|paragraph)\s+\d+',
@@ -58,7 +57,7 @@ def context_aware_chunk_text(text: str, chunk_size: int = 1200, chunk_overlap: i
     return [c for c in final_chunks if len(c.strip()) > 50]
 
 class HybridRetriever:
-    def __init__(self, documents, embedding_model, alpha=0.65):
+    def __init__(self, documents, embedding_model, alpha=0.7):
         self.docs = documents
         self.alpha = alpha
         self.embedding_model = embedding_model
@@ -74,13 +73,15 @@ class HybridRetriever:
         faiss.normalize_L2(embeddings)
         self.index.add(embeddings.astype('float32'))
         
-    def retrieve(self, query: str, k: int = 5):
-        query_lower = query.lower()
+    def retrieve(self, query: str, k: int = 6):
+        expanded_query = self._expand_query(query)
+        
+        query_lower = expanded_query.lower()
         tokenized_query = query_lower.split()
         
         bm25_scores = self.bm25.get_scores(tokenized_query)
         
-        query_embedding = self.embedding_model.encode([query])
+        query_embedding = self.embedding_model.encode([expanded_query])
         import faiss
         faiss.normalize_L2(query_embedding)
         scores, indices = self.index.search(query_embedding.astype('float32'), k*2)
@@ -101,6 +102,27 @@ class HybridRetriever:
         
         top_docs = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:k]
         return [self.docs[idx] for idx, _ in top_docs]
+    
+    def _expand_query(self, query: str) -> str:
+        expansions = {
+            'cataract': 'cataract eye refractive index correction vision surgery',
+            'maternity': 'maternity pregnancy childbirth delivery natal',
+            'grace period': 'grace period premium payment due date',
+            'pre-existing': 'pre-existing disease PED prior condition',
+            'organ donor': 'organ donor transplant harvesting donation',
+            'NCD': 'NCD no claim discount bonus',
+            'health check': 'health check preventive checkup examination',
+            'hospital': 'hospital medical facility institution establishment',
+            'AYUSH': 'AYUSH ayurveda yoga naturopathy unani siddha homeopathy',
+            'room rent': 'room rent ICU charges accommodation'
+        }
+        
+        expanded = query.lower()
+        for key, expansion in expansions.items():
+            if key in expanded:
+                expanded += ' ' + expansion
+        
+        return expanded
 
 class OptimizedRAGCore:
     def __init__(self, embedding_model, llm):
@@ -108,19 +130,20 @@ class OptimizedRAGCore:
         self.llm = llm
         
         self.prompt_template = ChatPromptTemplate.from_template("""
-Answer the question with complete information from the policy document. Provide comprehensive details including all conditions, timeframes, amounts, and requirements mentioned.
+Extract the key information to answer the question. Write one clear sentence with specific details.
 
-Examples of good answers:
-- "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits."
-- "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered."
+Examples:
+Question: "What is the grace period for premium payment?"
+Answer: "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits."
 
-Write complete sentences with full details. Include specific numbers, timeframes, conditions, and amounts.
+Question: "What is the waiting period for pre-existing diseases?"
+Answer: "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered."
 
 Context: {context}
 
 Question: {question}
 
-Complete Answer:""")
+Answer (one clear sentence with specific details):""")
 
     async def process_queries(self, pdf_url: str, questions: List[str]) -> List[str]:
         try:
@@ -135,7 +158,7 @@ Complete Answer:""")
             
             answers = []
             for question in questions:
-                relevant_docs = retriever.retrieve(question, k=5)
+                relevant_docs = retriever.retrieve(question, k=6)
                 context = "\n\n".join([doc.page_content for doc in relevant_docs])
                 
                 response = await asyncio.get_event_loop().run_in_executor(
@@ -145,7 +168,7 @@ Complete Answer:""")
                     question
                 )
                 
-                clean_answer = self._format_answer(response, question)
+                clean_answer = self._format_answer(response)
                 answers.append(clean_answer)
             
             return answers
@@ -162,7 +185,7 @@ Complete Answer:""")
         response = self.llm.invoke(messages)
         return response.content.strip()
     
-    def _format_answer(self, raw_answer: str, question: str) -> str:
+    def _format_answer(self, raw_answer: str) -> str:
         answer = raw_answer.strip()
         
         prefixes_to_remove = [
@@ -172,33 +195,22 @@ Complete Answer:""")
             "The document mentions that",
             "Answer:",
             "Response:",
-            "Complete Answer:",
         ]
         
         for prefix in prefixes_to_remove:
             if answer.lower().startswith(prefix.lower()):
                 answer = answer[len(prefix):].strip()
         
-        if not answer:
-            return f"Information not found in the policy document for: {question}"
+        if not answer or len(answer) < 10:
+            return "Information not available in the provided policy text."
         
-        if answer.startswith('[') and 'cut off' in answer.lower():
-            return f"Information not available in the provided policy text."
-        
-        if answer.lower().startswith('this question cannot be answered'):
-            return f"Information not available in the provided policy text."
-        
-        if 'provided text does not' in answer.lower():
-            return f"Information not available in the provided policy text."
+        answer = answer.replace('â', '-').replace('*', '').strip()
+        answer = re.sub(r'\s+', ' ', answer)
         
         if answer and not answer[0].isupper():
             answer = answer[0].upper() + answer[1:]
         
         if answer and not answer.endswith('.'):
             answer += '.'
-        
-        answer = re.sub(r'\s+', ' ', answer)
-        answer = answer.replace('â', '-')
-        answer = answer.replace('*', '')
         
         return answer
