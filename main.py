@@ -61,10 +61,10 @@ async def lifespan(app: FastAPI):
 
         model_cache["llm"] = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash-exp", 
-            temperature=0.05,
-            max_tokens=400,
-            timeout=12,
-            max_retries=2,
+            temperature=0.01,
+            max_tokens=600,
+            timeout=20,
+            max_retries=3,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         print("✅ LLM loaded")
@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="NSure-AI: Smart Insurance Assistant",
     description="Upload insurance PDFs and get instant answers",
-    version="2.0.0",
+    version="1.0.0",
     lifespan=lifespan
 )
 
@@ -107,7 +107,7 @@ class QueryResponse(BaseModel):
 
 @app.get("/", include_in_schema=False)
 def home():
-    return {"message": "NSure-AI v2.0 is running! Check /docs for API info."}
+    return {"message": "NSure-AI is running! Check /docs for API info."}
 
 @timed_cache(maxsize=16, ttl=3600)
 def get_or_create_rag(doc_url: str):
