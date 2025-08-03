@@ -54,72 +54,100 @@ class HybridRetriever:
         return [self.docs[i] for i in top_indices]
 
 def smart_chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 80) -> List[str]:
-    patterns = [
-        r'(?m)(^\s*\d+\.\s)',
-        r'(?m)(^\s*[a-zA-Z]\.\s)', 
-        r'(?m)(^\s*•\s)',
-        r'(?m)(^\s*Section\s\w+)',
-        r'(?m)(^\s*Clause\s\w+)',
-        r'(\n\s*\n)'
-    ]
-    
-    combined_pattern = '|'.join(patterns)
-    logical_splits = re.split(combined_pattern, text)
-    
-    combined_splits = []
-    i = 1
-    while i < len(logical_splits) - 1:
-        if logical_splits[i] and logical_splits[i+1]:
-            combined_text = (logical_splits[i] + logical_splits[i+1]).strip()
-            if combined_text and len(combined_text) > 50:
-                combined_splits.append(combined_text)
-        i += 2
-    
-    if logical_splits and logical_splits[0].strip():
-        combined_splits.insert(0, logical_splits[0].strip())
+    try:
+        patterns = [
+            r'^\s*\d+\.\s',
+            r'^\s*[a-zA-Z]\.\s',
+            r'^\s*•\s',
+            r'^\s*Section\s\w+',
+            r'^\s*Clause\s\w+',
+            r'\n\s*\n'
+        ]
+        
+        splits = []
+        current_pos = 0
+        
+        for pattern in patterns:
+            matches = list(re.finditer(pattern, text, re.MULTILINE))
+            for match in matches:
+                if match.start() > current_pos:
+                    splits.append((current_pos, match.start()))
+                current_pos = match.start()
+        
+        if current_pos < len(text):
+            splits.append((current_pos, len(text)))
+        
+        chunks = []
+        for start, end in splits:
+            chunk = text[start:end].strip()
+            if len(chunk) > 50:
+                chunks.append(chunk)
+        
+        if not chunks:
+            chunks = [text]
+        
+    except Exception as e:
+        print(f"Pattern splitting failed: {e}")
+        chunks = [text]
 
     final_chunks = []
-    recursive_splitter = RecursiveCharacterTextSplitter(
+    splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ".", "!", "?", ";", ",", " "]
     )
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = []
-        for chunk in combined_splits:
+        for chunk in chunks:
             if len(chunk) > chunk_size:
-                future = executor.submit(recursive_splitter.split_text, chunk)
+                future = executor.submit(splitter.split_text, chunk)
                 futures.append(future)
             else:
                 final_chunks.append(chunk)
         
         for future in concurrent.futures.as_completed(futures):
-            final_chunks.extend(future.result())
+            try:
+                final_chunks.extend(future.result())
+            except:
+                pass
     
     final_chunks = [c for c in final_chunks if len(c.strip()) > 30]
-    return final_chunks
+    return final_chunks if final_chunks else [text[:chunk_size]]
 
 class OptimizedRAGCore:
     def __init__(self, document_url: str, embedding_model, llm):
         print(f"🔄 Setting up optimized RAG for: {document_url}")
         self.llm = llm
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-        raw_text = get_pdf_text_from_url(document_url)
-        if not raw_text:
-            raise ValueError("PDF read failed - check URL")
+        try:
+            raw_text = get_pdf_text_from_url(document_url)
+            if not raw_text:
+                raise ValueError("PDF read failed")
+        except Exception as e:
+            print(f"PDF processing error: {e}")
+            raise ValueError(f"Document processing failed: {str(e)}")
 
-        print("📝 Smart chunking...")
-        chunks = smart_chunk_text(raw_text, chunk_size=800, chunk_overlap=80)
-        documents = [Document(page_content=chunk) for chunk in chunks]
-        print(f"✅ Created {len(documents)} optimized chunks")
+        try:
+            print("📝 Smart chunking...")
+            chunks = smart_chunk_text(raw_text, chunk_size=800, chunk_overlap=80)
+            documents = [Document(page_content=chunk) for chunk in chunks]
+            print(f"✅ Created {len(documents)} optimized chunks")
+        except Exception as e:
+            print(f"Chunking error: {e}")
+            documents = [Document(page_content=raw_text[:800])]
 
-        print("🧠 Building hybrid index...")
-        self.retriever = HybridRetriever(documents, embedding_model, alpha=0.65)
-        print("✅ Hybrid retriever ready")
+        try:
+            print("🧠 Building hybrid index...")
+            self.retriever = HybridRetriever(documents, embedding_model, alpha=0.65)
+            print("✅ Hybrid retriever ready")
+        except Exception as e:
+            print(f"Retriever error: {e}")
+            self.vector_store = FAISS.from_documents(documents, embedding_model)
+            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 4})
 
-        prompt_template = """Answer based only on the provided context. Give direct, factual answers without quotes.
+        prompt_template = """Based on the insurance document context, provide a precise answer.
 
 Context: {context}
 
@@ -131,19 +159,31 @@ Answer:"""
         self.qa_chain = create_stuff_documents_chain(self.llm, prompt)
         print("✅ QA system ready")
 
-    @lru_cache(maxsize=64)
-    def _cached_retrieve(self, question: str):
-        return self.retriever.retrieve(question, k=4)
+    def _safe_retrieve(self, question: str):
+        try:
+            if hasattr(self.retriever, 'retrieve'):
+                return self.retriever.retrieve(question, k=4)
+            else:
+                return self.retriever.invoke(question)
+        except Exception as e:
+            print(f"Retrieval error: {e}")
+            return []
 
     def answer_question(self, question: str) -> str:
-        docs = self._cached_retrieve(question)
-        
-        response = self.qa_chain.invoke({
-            "input": question,
-            "context": docs
-        })
-        
-        return response.strip()
+        try:
+            docs = self._safe_retrieve(question)
+            if not docs:
+                return "Unable to find relevant information in the document."
+            
+            response = self.qa_chain.invoke({
+                "input": question,
+                "context": docs
+            })
+            
+            return response.strip()
+        except Exception as e:
+            print(f"Answer generation error: {e}")
+            return f"Error processing question: {str(e)}"
 
     async def answer_questions_batch(self, questions: List[str]) -> List[str]:
         loop = asyncio.get_event_loop()
