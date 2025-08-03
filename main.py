@@ -61,8 +61,8 @@ async def lifespan(app: FastAPI):
 
         model_cache["llm"] = ChatGoogleGenerativeAI(
             model="gemini-1.5-pro", 
-            temperature=0.01,
-            max_tokens=600,
+            temperature=0.0,
+            max_tokens=100,
             timeout=20,
             max_retries=3,
             google_api_key=os.getenv("GOOGLE_API_KEY")
@@ -107,37 +107,21 @@ class QueryResponse(BaseModel):
 
 @app.get("/", include_in_schema=False)
 def home():
-    return {"message": "NSure-AI is running! Check /docs for API info."}
+    return {"status": "NSure-AI is running"}
 
-@timed_cache(maxsize=16, ttl=3600)
-def get_or_create_rag(doc_url: str):
-    cache_key = hashlib.md5(doc_url.encode()).hexdigest()
-    
-    if cache_key in pipeline_cache:
-        return pipeline_cache[cache_key]
-    
-    rag = OptimizedRAGCore(
-        document_url=doc_url,
-        embedding_model=model_cache["embedding_model"],
-        llm=model_cache["llm"]
-    )
-    
-    pipeline_cache[cache_key] = rag
-    return rag
-
-@app.post("/hackrx/run", response_model=QueryResponse, tags=["Main"])
-async def process_document(request: QueryRequest, token: str = Depends(check_auth)):
-    doc_url = request.documents
-    questions = request.questions
-    
-    loop = asyncio.get_event_loop()
-    rag = await loop.run_in_executor(executor, get_or_create_rag, doc_url)
-    
-    if len(questions) == 1:
-        answer = await loop.run_in_executor(executor, rag.answer_question, questions[0])
-        answers = [answer]
-    else:
-        tasks = [loop.run_in_executor(executor, rag.answer_question, q) for q in questions]
-        answers = await asyncio.gather(*tasks)
-    
-    return QueryResponse(answers=answers)
+@app.post("/hackrx/run", response_model=QueryResponse)
+async def query_documents(
+    request: QueryRequest,
+    token: str = Depends(check_auth)
+):
+    try:
+        rag = OptimizedRAGCore(
+            embedding_model=model_cache["embedding_model"],
+            llm=model_cache["llm"]
+        )
+        
+        answers = await rag.process_queries(request.documents, request.questions)
+        return QueryResponse(answers=answers)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
