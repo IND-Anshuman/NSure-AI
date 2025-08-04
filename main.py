@@ -113,7 +113,7 @@ async def periodic_cleanup():
 app = FastAPI(
     title="NSure-AI: Smart Insurance Assistant",
     description="Upload insurance PDFs and get instant answers",
-    version="1.0.0",
+    version="1.0.1",
     lifespan=lifespan
 )
 
@@ -134,7 +134,7 @@ def check_auth(credentials: HTTPAuthorizationCredentials = Security(bearer_auth)
 
 class QueryRequest(BaseModel):
     documents: str = Field(..., description="URL to PDF document")
-    questions: List[str] = Field(..., min_length=1, max_length=5, description="Questions to answer")
+    questions: List[str] = Field(..., min_length=1, description="Questions to answer")
 
 class QueryResponse(BaseModel):
     answers: List[str]

@@ -3,7 +3,7 @@ import asyncio
 import concurrent.futures
 import numpy as np
 import pickle
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from functools import lru_cache
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -97,21 +97,36 @@ Question: {question}
 
 Answer (one sentence with specific details):""")
 
+    async def _get_answer_for_question(self, question: str, retriever: HybridRetriever) -> Tuple[str, str]:
+        relevant_docs = retriever.retrieve(question, k=6)
+        context = "\n\n".join([doc.page_content for doc in relevant_docs[:4]])
+        
+        response = await asyncio.get_event_loop().run_in_executor(
+            None, 
+            self._get_answer_from_llm, 
+            context, 
+            question
+        )
+        
+        clean_answer = self._format_answer(response)
+        return question, clean_answer
+
     async def process_queries(self, pdf_url: str, questions: List[str]) -> List[str]:
         try:
             # Check query cache first
-            cached_answers = []
+            cached_answers = {}
             uncached_questions = []
             
-            for question in questions:
-                cached_answer = await db_cache.get_query_cache(pdf_url, question)
+            cache_results = await asyncio.gather(*[db_cache.get_query_cache(pdf_url, q) for q in questions])
+
+            for question, cached_answer in zip(questions, cache_results):
                 if cached_answer:
-                    cached_answers.append((question, cached_answer))
+                    cached_answers[question] = cached_answer
                 else:
                     uncached_questions.append(question)
             
             if not uncached_questions:
-                return [ans for _, ans in sorted(cached_answers, key=lambda x: questions.index(x[0]))]
+                return [cached_answers[q] for q in questions]
             
             # Check document cache
             doc_cache_data = await db_cache.get_doc_cache(pdf_url)
@@ -134,38 +149,23 @@ Answer (one sentence with specific details):""")
             docs = [Document(page_content=chunk) for chunk in chunks]
             retriever = HybridRetriever(docs, self.embedding_model)
             
-            # Process uncached questions
-            new_answers = []
-            for question in uncached_questions:
-                relevant_docs = retriever.retrieve(question, k=6)
-                context = "\n\n".join([doc.page_content for doc in relevant_docs[:4]])
-                
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    self._get_answer, 
-                    context, 
-                    question
-                )
-                
-                clean_answer = self._format_answer(response)
-                new_answers.append(clean_answer)
-                
-                # Cache the answer
-                await db_cache.set_query_cache(pdf_url, question, clean_answer)
+            # Process uncached questions concurrently
+            tasks = [self._get_answer_for_question(q, retriever) for q in uncached_questions]
+            new_results = await asyncio.gather(*tasks)
+
+            # Cache new answers
+            cache_tasks = []
+            for question, answer in new_results:
+                cached_answers[question] = answer
+                cache_tasks.append(db_cache.set_query_cache(pdf_url, question, answer))
+            await asyncio.gather(*cache_tasks)
             
-            # Combine cached and new answers in correct order
-            all_answers = {}
-            for question, answer in cached_answers:
-                all_answers[question] = answer
-            for question, answer in zip(uncached_questions, new_answers):
-                all_answers[question] = answer
-            
-            return [all_answers[q] for q in questions]
+            return [cached_answers[q] for q in questions]
             
         except Exception as e:
             return [f"Error: {str(e)}"] * len(questions)
 
-    def _get_answer(self, context: str, question: str) -> str:
+    def _get_answer_from_llm(self, context: str, question: str) -> str:
         try:
             prompt = self.prompt_template.format(context=context[:2000], question=question)
             response = self.llm.invoke(prompt)
