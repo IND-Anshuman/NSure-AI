@@ -2,7 +2,8 @@ import re
 import asyncio
 import concurrent.futures
 import numpy as np
-from typing import List
+import pickle
+from typing import List, Optional
 from functools import lru_cache
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -10,119 +11,78 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from utils import get_pdf_text_from_url
 from rank_bm25 import BM25Okapi
+from database import db_cache
 
-def context_aware_chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 100) -> List[str]:
-    section_patterns = [
-        r'(?i)(coverage|benefit|exclusion|limitation|condition|procedure|treatment)',
-        r'(?i)(section|clause|article|paragraph)\s+\d+',
-        r'(?i)(what.*covered|what.*not.*covered|how.*works)',
-        r'\d+\.\s+[A-Z]',
-        r'[A-Z][a-z]+:\s*',
-    ]
-    
-    sections = []
-    current_section = ""
-    
-    lines = text.split('\n')
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        is_new_section = any(re.search(pattern, line) for pattern in section_patterns)
-        
-        if is_new_section and current_section and len(current_section) > 100:
-            sections.append(current_section.strip())
-            current_section = line
-        else:
-            current_section += ' ' + line
-    
-    if current_section:
-        sections.append(current_section.strip())
-    
-    final_chunks = []
+@lru_cache(maxsize=64)
+def context_aware_chunk_text(text_hash: str, text: str, chunk_size: int = 700, chunk_overlap: int = 80) -> List[str]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " "]
+        separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""],
+        length_function=len,
+        is_separator_regex=False
     )
     
-    for section in sections:
-        if len(section) > chunk_size:
-            sub_chunks = splitter.split_text(section)
-            final_chunks.extend(sub_chunks)
-        else:
-            final_chunks.append(section)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    cleaned_sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+    cleaned_text = ' '.join(cleaned_sentences)
     
-    return [c for c in final_chunks if len(c.strip()) > 50]
+    chunks = splitter.split_text(cleaned_text)
+    return [chunk.strip() for chunk in chunks if len(chunk.strip()) > 20]
 
 class HybridRetriever:
-    def __init__(self, documents, embedding_model, alpha=0.7):
-        self.docs = documents
-        self.alpha = alpha
+    def __init__(self, docs: List[Document], embedding_model):
+        self.docs = docs
         self.embedding_model = embedding_model
-        
-        doc_texts = [doc.page_content for doc in documents]
-        tokenized_docs = [text.lower().split() for text in doc_texts]
-        self.bm25 = BM25Okapi(tokenized_docs)
-        
-        embeddings = self.embedding_model.encode([d.page_content for d in documents])
-        import faiss
-        d = embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(d)
-        faiss.normalize_L2(embeddings)
-        self.index.add(embeddings.astype('float32'))
-        
-    def retrieve(self, query: str, k: int = 6):
-        expanded_query = self._expand_query(query)
-        
-        query_lower = expanded_query.lower()
-        tokenized_query = query_lower.split()
-        
-        bm25_scores = self.bm25.get_scores(tokenized_query)
-        
-        query_embedding = self.embedding_model.encode([expanded_query])
-        import faiss
-        faiss.normalize_L2(query_embedding)
-        scores, indices = self.index.search(query_embedding.astype('float32'), k*2)
-        
-        final_scores = {}
-        
-        if len(bm25_scores) > 0:
-            bm25_max = max(bm25_scores) if max(bm25_scores) > 0 else 1
-            for i, score in enumerate(bm25_scores):
-                final_scores[i] = self.alpha * (score / bm25_max)
-        
-        for i, (semantic_score, doc_idx) in enumerate(zip(scores[0], indices[0])):
-            if doc_idx < len(self.docs):
-                if doc_idx in final_scores:
-                    final_scores[doc_idx] += (1 - self.alpha) * semantic_score
-                else:
-                    final_scores[doc_idx] = (1 - self.alpha) * semantic_score
-        
-        top_docs = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:k]
-        return [self.docs[idx] for idx, _ in top_docs]
+        self.bm25 = None
+        self.vector_store = None
+        self._setup_retrievers()
     
-    def _expand_query(self, query: str) -> str:
-        expansions = {
-            'cataract': 'cataract eye refractive index correction vision surgery',
-            'maternity': 'maternity pregnancy childbirth delivery natal',
-            'grace period': 'grace period premium payment due date',
-            'pre-existing': 'pre-existing disease PED prior condition',
-            'organ donor': 'organ donor transplant harvesting donation',
-            'NCD': 'NCD no claim discount bonus',
-            'health check': 'health check preventive checkup examination',
-            'hospital': 'hospital medical facility institution establishment',
-            'AYUSH': 'AYUSH ayurveda yoga naturopathy unani siddha homeopathy',
-            'room rent': 'room rent ICU charges accommodation'
-        }
+    def _setup_retrievers(self):
+        if not self.docs:
+            return
+            
+        texts = [doc.page_content for doc in self.docs]
+        tokenized_texts = [text.lower().split() for text in texts]
+        self.bm25 = BM25Okapi(tokenized_texts)
         
-        expanded = query.lower()
-        for key, expansion in expansions.items():
-            if key in expanded:
-                expanded += ' ' + expansion
+        try:
+            self.vector_store = FAISS.from_documents(
+                self.docs, 
+                self.embedding_model,
+                normalize_L2=True
+            )
+        except Exception as e:
+            print(f"FAISS setup error: {e}")
+    
+    def retrieve(self, query: str, k: int = 6) -> List[Document]:
+        if not self.docs:
+            return []
         
-        return expanded
+        results = []
+        
+        if self.bm25:
+            tokenized_query = query.lower().split()
+            bm25_scores = self.bm25.get_scores(tokenized_query)
+            bm25_top_k = np.argsort(bm25_scores)[-k:][::-1]
+            results.extend([self.docs[i] for i in bm25_top_k if bm25_scores[i] > 0])
+        
+        if self.vector_store:
+            try:
+                vector_docs = self.vector_store.similarity_search(query, k=k)
+                results.extend(vector_docs)
+            except Exception:
+                pass
+        
+        seen = set()
+        unique_results = []
+        for doc in results:
+            content_hash = hash(doc.page_content[:100])
+            if content_hash not in seen:
+                seen.add(content_hash)
+                unique_results.append(doc)
+        
+        return unique_results[:k]
 
 class OptimizedRAGCore:
     def __init__(self, embedding_model, llm):
@@ -130,36 +90,55 @@ class OptimizedRAGCore:
         self.llm = llm
         
         self.prompt_template = ChatPromptTemplate.from_template("""
-Extract the key information to answer the question. Write one clear sentence with specific details.
-
-Examples:
-Question: "What is the grace period for premium payment?"
-Answer: "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits."
-
-Question: "What is the waiting period for pre-existing diseases?"
-Answer: "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered."
+Extract key information to answer the question. Write one clear sentence with specific details.
 
 Context: {context}
-
 Question: {question}
 
-Answer (one clear sentence with specific details):""")
+Answer (one sentence with specific details):""")
 
     async def process_queries(self, pdf_url: str, questions: List[str]) -> List[str]:
         try:
-            text = get_pdf_text_from_url(pdf_url)
-            if not text:
-                return ["Error: Could not extract text from PDF"] * len(questions)
+            # Check query cache first
+            cached_answers = []
+            uncached_questions = []
             
-            chunks = context_aware_chunk_text(text)
+            for question in questions:
+                cached_answer = await db_cache.get_query_cache(pdf_url, question)
+                if cached_answer:
+                    cached_answers.append((question, cached_answer))
+                else:
+                    uncached_questions.append(question)
+            
+            if not uncached_questions:
+                return [ans for _, ans in sorted(cached_answers, key=lambda x: questions.index(x[0]))]
+            
+            # Check document cache
+            doc_cache_data = await db_cache.get_doc_cache(pdf_url)
+            
+            if doc_cache_data:
+                text = doc_cache_data['text']
+                chunks = doc_cache_data['chunks']
+            else:
+                text = get_pdf_text_from_url(pdf_url)
+                if not text:
+                    return ["Error: Could not extract text from PDF"] * len(questions)
+                
+                text_hash = hash(text[:1000])
+                chunks = context_aware_chunk_text(str(text_hash), text)
+                
+                # Cache document
+                embeddings_bytes = pickle.dumps([])  # Placeholder
+                await db_cache.set_doc_cache(pdf_url, text, chunks, embeddings_bytes)
+            
             docs = [Document(page_content=chunk) for chunk in chunks]
-            
             retriever = HybridRetriever(docs, self.embedding_model)
             
-            answers = []
-            for question in questions:
-                relevant_docs = retriever.retrieve(question, k=8)
-                context = "\n\n".join([doc.page_content for doc in relevant_docs])
+            # Process uncached questions
+            new_answers = []
+            for question in uncached_questions:
+                relevant_docs = retriever.retrieve(question, k=6)
+                context = "\n\n".join([doc.page_content for doc in relevant_docs[:4]])
                 
                 response = await asyncio.get_event_loop().run_in_executor(
                     None, 
@@ -169,48 +148,37 @@ Answer (one clear sentence with specific details):""")
                 )
                 
                 clean_answer = self._format_answer(response)
-                answers.append(clean_answer)
+                new_answers.append(clean_answer)
+                
+                # Cache the answer
+                await db_cache.set_query_cache(pdf_url, question, clean_answer)
             
-            return answers
+            # Combine cached and new answers in correct order
+            all_answers = {}
+            for question, answer in cached_answers:
+                all_answers[question] = answer
+            for question, answer in zip(uncached_questions, new_answers):
+                all_answers[question] = answer
+            
+            return [all_answers[q] for q in questions]
             
         except Exception as e:
-            return [f"Error processing query: {str(e)}"] * len(questions)
-    
+            return [f"Error: {str(e)}"] * len(questions)
+
     def _get_answer(self, context: str, question: str) -> str:
-        messages = self.prompt_template.format_messages(
-            context=context,
-            question=question
-        )
-        
-        response = self.llm.invoke(messages)
-        return response.content.strip()
-    
+        try:
+            prompt = self.prompt_template.format(context=context[:2000], question=question)
+            response = self.llm.invoke(prompt)
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            return f"Error generating answer: {str(e)}"
+
     def _format_answer(self, raw_answer: str) -> str:
         answer = raw_answer.strip()
-        
-        prefixes_to_remove = [
-            "According to the policy,",
-            "The policy states that",
-            "Based on the document,",
-            "The document mentions that",
-            "Answer:",
-            "Response:",
-        ]
-        
-        for prefix in prefixes_to_remove:
-            if answer.lower().startswith(prefix.lower()):
-                answer = answer[len(prefix):].strip()
-        
-        if not answer or len(answer) < 10:
-            return "Information not available in the provided policy text."
-        
-        answer = answer.replace('â', '-').replace('*', '').strip()
         answer = re.sub(r'\s+', ' ', answer)
+        answer = re.sub(r'^(Answer|Response|Based on|According to)[:\s]*', '', answer, flags=re.IGNORECASE)
         
-        if answer and not answer[0].isupper():
-            answer = answer[0].upper() + answer[1:]
-        
-        if answer and not answer.endswith('.'):
+        if not answer.endswith(('.', '!', '?')):
             answer += '.'
         
-        return answer
+        return answer[:400] if len(answer) > 400 else answer

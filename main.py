@@ -4,23 +4,28 @@ import asyncio
 import hashlib
 import time
 import functools
+import pickle
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict
+import uvloop
 
 warnings.filterwarnings("ignore")
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 os.environ["HF_HOME"] = "/tmp/hf_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache/transformers"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 model_cache = {}
 pipeline_cache = {}
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="rag_worker")
 
-def timed_cache(maxsize=32, ttl=1800):
+def timed_cache(maxsize=128, ttl=3600):
     def decorator(func):
         cache = {}
         cache_times = {}
@@ -30,18 +35,18 @@ def timed_cache(maxsize=32, ttl=1800):
             key = str(args) + str(sorted(kwargs.items()))
             current_time = time.time()
             
-            if key in cache and current_time - cache_times[key] < ttl:
+            if key in cache and (current_time - cache_times[key]) < ttl:
                 return cache[key]
             
             result = func(*args, **kwargs)
-            cache[key] = result
-            cache_times[key] = current_time
             
-            if len(cache) > maxsize:
-                oldest_key = min(cache_times.keys(), key=lambda k: cache_times[k])
+            if len(cache) >= maxsize:
+                oldest_key = min(cache_times.keys(), key=cache_times.get)
                 del cache[oldest_key]
                 del cache_times[oldest_key]
             
+            cache[key] = result
+            cache_times[key] = current_time
             return result
         return wrapper
     return decorator
@@ -52,31 +57,58 @@ async def lifespan(app: FastAPI):
     from sentence_transformers import SentenceTransformer
     from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
+    from database import db_cache
     
     load_dotenv()
     
     try:
-        model_cache["embedding_model"] = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        # Initialize database
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            await db_cache.init_pool(database_url)
+            print("✅ Database connected")
+        
+        # Load embedding model with optimizations
+        model_cache["embedding_model"] = SentenceTransformer(
+            'sentence-transformers/all-MiniLM-L6-v2',
+            device='cpu',
+            cache_folder='/tmp/hf_cache'
+        )
+        model_cache["embedding_model"].half()  # Use FP16
         print("✅ Embeddings loaded")
 
+        # Optimized LLM with reduced parameters
         model_cache["llm"] = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro", 
-            temperature=0.1,
-            max_tokens=80,
-            timeout=25,
-            max_retries=2,
+            model="gemini-1.5-flash", 
+            temperature=0.05,
+            max_tokens=60,
+            timeout=15,
+            max_retries=1,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         print("✅ LLM loaded")
+        
+        # Cleanup task
+        asyncio.create_task(periodic_cleanup())
+        
     except Exception as e:
         print(f"❌ Error: {e}")
         raise e
 
     yield
     
-    executor.shutdown(wait=True)
+    executor.shutdown(wait=False)
     model_cache.clear()
     pipeline_cache.clear()
+
+async def periodic_cleanup():
+    while True:
+        await asyncio.sleep(21600)  # 6 hours
+        try:
+            from database import db_cache
+            await db_cache.cleanup_old_cache(3)
+        except Exception as e:
+            print(f"Cleanup error: {e}")
 
 app = FastAPI(
     title="NSure-AI: Smart Insurance Assistant",
@@ -84,6 +116,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 from rag_core import OptimizedRAGCore
 
@@ -100,7 +134,7 @@ def check_auth(credentials: HTTPAuthorizationCredentials = Security(bearer_auth)
 
 class QueryRequest(BaseModel):
     documents: str = Field(..., description="URL to PDF document")
-    questions: List[str] = Field(..., min_length=1, description="Questions to answer")
+    questions: List[str] = Field(..., min_length=1, max_length=5, description="Questions to answer")
 
 class QueryResponse(BaseModel):
     answers: List[str]
