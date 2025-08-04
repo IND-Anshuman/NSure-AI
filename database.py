@@ -10,7 +10,7 @@ class PostgresCache:
     def __init__(self):
         self.pool = None
     
-    async def clear_all_cache(self):
+    async def initialize_and_clear_cache(self):
         """
         Wipes all data from the documents table.
         The CASCADE option ensures all related chunks are also deleted.
