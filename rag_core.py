@@ -175,8 +175,12 @@ Answer (one sentence with specific details):""")
 
     def _format_answer(self, raw_answer: str) -> str:
         answer = raw_answer.strip()
+        # Remove escaped quotes
+        answer = answer.replace('\\"', '"')
+        # Collapse whitespace
         answer = re.sub(r'\s+', ' ', answer)
-        answer = re.sub(r'^(Answer|Response|Based on|According to)[:\s]*', '', answer, flags=re.IGNORECASE)
+        # Remove boilerplate prefixes
+        answer = re.sub(r'^(Answer|Response|Based on|According to)[:\s]*', '', answer, flags=re.IGNORECASE).strip()
         
         if not answer.endswith(('.', '!', '?')):
             answer += '.'
