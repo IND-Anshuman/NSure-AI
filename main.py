@@ -14,9 +14,6 @@ from pydantic import BaseModel, Field
 from typing import List, Dict
 import uvloop
 
-# Add this import for the LangChain wrapper
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
-
 warnings.filterwarnings("ignore")
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
@@ -57,7 +54,8 @@ def timed_cache(maxsize=128, ttl=3600):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("--- Loading models ---")
-    from sentence_transformers import SentenceTransformer
+    # Updated imports
+    from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_google_genai import ChatGoogleGenerativeAI
     from dotenv import load_dotenv
     from database import db_cache
@@ -72,23 +70,26 @@ async def lifespan(app: FastAPI):
             print("✅ Database connected")
         
         # --- START: MODIFIED SECTION ---
-        # 1. Load the raw SentenceTransformer model
-        raw_embedding_model = SentenceTransformer(
-            'sentence-transformers/all-MiniLM-L6-v2',
-            device='cpu',
+        # Replaced manual loading with the new recommended approach
+        model_name = 'sentence-transformers/all-MiniLM-L6-v2'
+        # Set model to run on CPU
+        model_kwargs = {'device': 'cpu'}
+        # Normalize embeddings for better FAISS performance
+        encode_kwargs = {'normalize_embeddings': True}
+
+        model_cache["embedding_model"] = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs,
             cache_folder='/tmp/hf_cache'
         )
-        raw_embedding_model.half()  # Use FP16
-
-        # 2. Wrap the model for LangChain compatibility
-        model_cache["embedding_model"] = SentenceTransformerEmbeddings(client=raw_embedding_model)
         # --- END: MODIFIED SECTION ---
         
-        print("✅ Embeddings loaded and wrapped")
+        print("✅ Embeddings loaded")
 
         # Optimized LLM with reduced parameters
         model_cache["llm"] = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro", 
+            model="gemini-1.5-flash", 
             temperature=0.05,
             max_tokens=60,
             timeout=15,
