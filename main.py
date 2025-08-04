@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from typing import List, Dict
 import uvloop
 
+# Add this import for the LangChain wrapper
+from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+
 warnings.filterwarnings("ignore")
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
@@ -68,18 +71,24 @@ async def lifespan(app: FastAPI):
             await db_cache.init_pool(database_url)
             print("✅ Database connected")
         
-        # Load embedding model with optimizations
-        model_cache["embedding_model"] = SentenceTransformer(
+        # --- START: MODIFIED SECTION ---
+        # 1. Load the raw SentenceTransformer model
+        raw_embedding_model = SentenceTransformer(
             'sentence-transformers/all-MiniLM-L6-v2',
             device='cpu',
             cache_folder='/tmp/hf_cache'
         )
-        model_cache["embedding_model"].half()  # Use FP16
-        print("✅ Embeddings loaded")
+        raw_embedding_model.half()  # Use FP16
+
+        # 2. Wrap the model for LangChain compatibility
+        model_cache["embedding_model"] = SentenceTransformerEmbeddings(client=raw_embedding_model)
+        # --- END: MODIFIED SECTION ---
+        
+        print("✅ Embeddings loaded and wrapped")
 
         # Optimized LLM with reduced parameters
         model_cache["llm"] = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash", 
+            model="gemini-1.5-pro", 
             temperature=0.05,
             max_tokens=60,
             timeout=15,
@@ -113,7 +122,7 @@ async def periodic_cleanup():
 app = FastAPI(
     title="NSure-AI: Smart Insurance Assistant",
     description="Upload insurance PDFs and get instant answers",
-    version="1.0.1",
+    version="1.0.0",
     lifespan=lifespan
 )
 
