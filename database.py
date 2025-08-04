@@ -2,6 +2,7 @@ import asyncio
 import asyncpg
 import json
 import hashlib
+import os
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 
@@ -19,7 +20,40 @@ class PostgresCache:
             return
         
         async with self.pool.acquire() as connection:
-            await connection.execute("TRUNCATE TABLE documents CASCADE;")
+            await connection.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id SERIAL PRIMARY KEY,
+                    url_hash VARCHAR(64) UNIQUE NOT NULL,
+                    url TEXT NOT NULL,
+                    content TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS chunks (
+                    id SERIAL PRIMARY KEY,
+                    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                    chunk_text TEXT NOT NULL,
+                    embedding VECTOR(384)
+                );
+            """)
+            print("✅ Database tables checked/created.")
+
+            # Step 2: If the flag is set, run a safe truncate command.
+            if os.getenv("CLEAR_CACHE_ON_RESTART", "false").lower() == "true":
+                print("🔥 CLEAR_CACHE_ON_RESTART is true. Wiping database cache...")
+                # This DO block checks if the table exists before truncating.
+                # This is the SQL equivalent of "TRUNCATE IF EXISTS".
+                await connection.execute("""
+                    DO $$
+                    BEGIN
+                    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename  = 'documents') THEN
+                        TRUNCATE TABLE documents CASCADE;
+                    END IF;
+                    END $$;
+                """)
+                print("✅ Database cache cleared successfully.")
             
     async def init_pool(self, database_url: str):
         self.pool = await asyncpg.create_pool(
