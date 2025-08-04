@@ -90,15 +90,23 @@ class OptimizedRAGCore:
         self.llm = llm
         
         self.prompt_template = ChatPromptTemplate.from_template("""
-Extract key information to answer the question. Write one clear sentence with specific details.
+Extract the key information to answer the question. Write one clear sentence with specific details.
+
+Examples:
+Question: "What is the grace period for premium payment?"
+Answer: "A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits."
+
+Question: "What is the waiting period for pre-existing diseases?"
+Answer: "There is a waiting period of thirty-six (36) months of continuous coverage from the first policy inception for pre-existing diseases and their direct complications to be covered."
 
 Context: {context}
+
 Question: {question}
 
-Answer (one sentence with specific details):""")
+Answer (one clear sentence with specific details):""")
 
     async def _get_answer_for_question(self, question: str, retriever: HybridRetriever) -> Tuple[str, str]:
-        relevant_docs = retriever.retrieve(question, k=6)
+        relevant_docs = retriever.retrieve(question, k=8)
         context = "\n\n".join([doc.page_content for doc in relevant_docs[:4]])
         
         response = await asyncio.get_event_loop().run_in_executor(

@@ -89,11 +89,11 @@ async def lifespan(app: FastAPI):
 
         # Optimized LLM with reduced parameters
         model_cache["llm"] = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash", 
-            temperature=0.05,
-            max_tokens=60,
-            timeout=15,
-            max_retries=1,
+            model="gemini-1.5-pro", 
+            temperature=0.1,
+            max_tokens=80,
+            timeout=25,
+            max_retries=2,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         print("✅ LLM loaded")
