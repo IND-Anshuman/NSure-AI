@@ -8,7 +8,19 @@ from contextlib import asynccontextmanager
 class PostgresCache:
     def __init__(self):
         self.pool = None
+    
+    async def clear_all_cache(self):
+        """
+        Wipes all data from the documents table.
+        The CASCADE option ensures all related chunks are also deleted.
+        """
+        if not self.pool:
+            print("⚠️ Cannot clear cache, database pool is not initialized.")
+            return
         
+        async with self.pool.acquire() as connection:
+            await connection.execute("TRUNCATE TABLE documents CASCADE;")
+            
     async def init_pool(self, database_url: str):
         self.pool = await asyncpg.create_pool(
             database_url,

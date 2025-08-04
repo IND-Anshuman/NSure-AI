@@ -68,9 +68,13 @@ async def lifespan(app: FastAPI):
         if database_url:
             await db_cache.init_pool(database_url)
             print("✅ Database connected")
+        if os.getenv("CLEAR_CACHE_ON_RESTART", "false").lower() == "true":
+            print("🔥 CLEAR_CACHE_ON_RESTART is true. Wiping database cache...")
+
+            await db_cache.clear_all_cache()
+            print("✅ Database cache cleared successfully.")
         
-        # --- START: MODIFIED SECTION ---
-        # Replaced manual loading with the new recommended approach
+
         model_name = 'sentence-transformers/all-MiniLM-L6-v2'
         # Set model to run on CPU
         model_kwargs = {'device': 'cpu'}
